@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+    <category label="Данни за абонамент">
+        <setting label="Потребител" type="text"   id="username" default="" />
+        <setting label="Парола" type="text"   id="password" option="hidden" default="" />
+        <setting type="sep"/>
+    </category>
+</settings>
