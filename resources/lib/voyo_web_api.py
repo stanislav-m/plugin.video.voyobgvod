@@ -229,6 +229,15 @@ x=device&a=remove&id={}r={}'.format(dev_id, random.random())
                            'https://voyo.bg{}'.format(it.a.div.img['src'])))
         return channel_list
 
+    def __play_link(self, soup):
+        play_cover = soup.find('div', class_='cover-play-video')
+        if play_cover:
+            pl = play_cover.find('a', 
+                                 onclick="playVideoOnFullScreen('main'); return false;")
+            if pl:
+                return True
+        return False
+
     def __player_params(self, soup):
         s_patt = {
             'section' : 'ut_section_id = .(\\d+).;',
@@ -285,9 +294,10 @@ x=device&a=remove&id={}r={}'.format(dev_id, random.random())
             if not self.device_allowed():
                 if not self.device_add():
                     return None
-            if self.__user_can_consume(pl_par['product']):
-                return self.__get_vod_url(pl_par['product'], pl_par['unit'], pl_par['media'],
-                    pl_par['site'], pl_par['section'], self.__settings['device'])
+            if self.__play_link(soup):
+                if self.__user_can_consume(pl_par['product']):
+                    return self.__get_vod_url(pl_par['product'], pl_par['unit'], pl_par['media'],
+                        pl_par['site'], pl_par['section'], self.__settings['device'])
             return None
 
     def __play_title(self, soup):

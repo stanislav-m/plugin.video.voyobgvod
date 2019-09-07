@@ -254,6 +254,11 @@ def play_vod(category, name, link, img, plot):
             li.setMimeType('application/dash+xml')
             li.setProperty("IsPlayable", str(True))
             xbmc.Player().play(item=play_param['play_url'], listitem=li)
+    else:
+        dialog = xbmcgui.Dialog()
+        dialog.ok(
+        u'Грешка',
+        u'Видеото не е налично.')
 
 
 def router(paramstring):
