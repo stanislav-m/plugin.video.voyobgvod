@@ -8,7 +8,11 @@ import xbmcplugin
 import xbmcaddon
 from bs4 import BeautifulSoup
 from resources.lib.voyo_web_api import *
-import inputstreamhelper
+if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
+    import inputstreamhelper
+    tv_only = False
+else:
+    tv_only = True 
 import uuid
 
 config_par = ['username', 'password', 'device']
@@ -105,17 +109,19 @@ def get_platform():
    ]
 
   for platform in platforms:
-    if xbmc.getCondVisibility('System.Platform.{}'.format(platform)):
+    if xbmc.getCondVisibility('System.Platform.{0}'.format(platform)):
       return platform
   return "Unknown"
 
+def get_version():
+    return xbmc.getInfoLabel("System.BuildVersion")
 
 def log_primitive(msg, level):
     if str(type(msg)) == "<type 'unicode'>":
         s = msg.encode('utf-8')
     else:
         s = str(msg)
-    xbmc.log("{} v{} | {}".format(get_addon_id(), get_addon_version(), s), level)
+    xbmc.log("{0} v{1} | {2}".format(get_addon_id(), get_addon_version(), s), level)
 
 def log(msg, level=xbmc.LOGDEBUG):
     try:
@@ -125,7 +131,7 @@ def log(msg, level=xbmc.LOGDEBUG):
                 log_primitive(msg, level)
         elif str(type(msg)) == "<type 'dict'>":
             for key in msg:
-                log_primitive('{} : {}'.format(key, msg[key]), level)
+                log_primitive('{0} : {1}'.format(key, msg[key]), level)
         else:
             log_primitive(msg, level)
 
@@ -143,6 +149,10 @@ def list_categories():
     xbmcplugin.setContent(_handle, 'videos')
     categories = voyo.sections()
     for name, link in categories:
+        if tv_only:
+            if link != '/tv-radio/':
+                continue
+
         li = xbmcgui.ListItem(label=name)
         li.setInfo('video', {'title': name,
                                     'genre': 'Voyo content',
@@ -152,23 +162,22 @@ def list_categories():
         xbmcplugin.addDirectoryItem(_handle, url, li, is_folder)
     xbmcplugin.endOfDirectory(_handle)
 
-def list_item(name, link, img, plot, act_str, playable):
-    log('{} :  {} - {}'.format(name, link, img))
+def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
+    log('{0} :  {1} - {2}'.format(name, link, img))
     li = xbmcgui.ListItem(label=name)
-    li.setArt({'thumb': img, 'icon': '', 'fanart': ''})
-    li.setInfo('video', {'title': name, 'Plot': plot})
-    if playable:
-        url = link
-    else:
-        url = get_url(action=act_str, category=link.replace('/', '_'),
-                      name=name, img=img, plot=plot, link=link)
-    if playable:
-        li.setProperty("IsPlayable", str(True))
-        is_folder = False
-        xbmcplugin.addDirectoryItem(_handle, url, li)
-    else:
-        is_folder = True
-        xbmcplugin.addDirectoryItem(_handle, url, li, is_folder)
+    art = { 'thumb': img, 'poster': img, 'banner' : img, 'fanart': img }
+    li.setArt(art)
+    info_labels = {'title': name, 'plot': plot}
+    if meta_inf:
+        info_labels.update(meta_inf)
+    li.setInfo('video', info_labels)
+    ctxtmenu = []
+    ctxtmenu.append(('Информация', 'XBMC.Action(Info)'))
+    li.addContextMenuItems(ctxtmenu)
+
+    url = get_url(action=act_str, category=link.replace('/', '_'),
+                  name=name, img=img, plot=plot, link=link)
+    xbmcplugin.addDirectoryItem(_handle, url, li, True)
 
 def list_content(category):
     cat_link = category.replace('_', '/')
@@ -182,15 +191,21 @@ def list_content(category):
             list_item(name, link, img, '', action_str, False)
     else:
         content = voyo.process_page(cat_link)
-        if str(type(content)) == "<type 'list'>":
-            action_str = 'listing_sections'
-            for cont in content:
-                name, link, img = cont
-                list_item(name, link, img, '', action_str, False)
+        if content:
+            if str(type(content)) == "<type 'list'>":
+                action_str = 'listing_sections'
+                for cont in content:
+                    name, link, img = cont
+                    list_item(name, link, img, '', action_str, False)
+            else:
+                action_str = 'play_vod'
+                name, link, img, plot, meta = content
+                list_item(name, link, img, plot, action_str, False, meta)
         else:
-            action_str = 'play_vod'
-            name, link, img, plot = content
-            list_item(name, link, img, plot, action_str, False)
+            dialog = xbmcgui.Dialog()
+            dialog.ok(
+            u'Грешка',
+            u'Вашето устройство не може да възпроизведе това видео.')
 
     xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_NONE)
     xbmcplugin.endOfDirectory(_handle)
@@ -207,7 +222,7 @@ def device_status():
         devices = voyo.get_devices()
         dev_lst = []
         for name1, name2, act_text, dev_id in devices:
-            dev_lst.append('{} {} {} ({})'.format(name1, name2, act_text, dev_id))
+            dev_lst.append('{0} {1} {2} ({3})'.format(name1, name2, act_text, dev_id))
         i = dialog.select(u'Избери устройство за изтриване:', dev_lst)
         if not voyo.remove_device(devices[i][3]):
             dialog.ok(u'Грешка', u'Неуспешно изтриване на устройство.')
@@ -218,22 +233,37 @@ def play_tv(category, name, link, img, plot):
     play_url = voyo.channel(link)
     if play_url:
         headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
-        PROTOCOL = 'hls'
-        is_helper = inputstreamhelper.Helper(PROTOCOL)
-        if is_helper.check_inputstream():
+        if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
+            PROTOCOL = 'hls'
+            is_helper = inputstreamhelper.Helper(PROTOCOL)
+            if is_helper.check_inputstream():
+                li = xbmcgui.ListItem(label=name, path=play_url)
+                li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
+                li.setArt({'thumb':img, 'icon':'', 'fanart':''})
+                li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
+                li.setProperty('inputstream.adaptive.stream_headers', headers)
+                li.setProperty("IsPlayable", str(True))
+                xbmc.Player().play(item=play_url, listitem=li)
+            else:
+                log('inputstreamhelper check failed.')
+        else:
             li = xbmcgui.ListItem(label=name, path=play_url)
             li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
             li.setArt({'thumb':img, 'icon':'', 'fanart':''})
-            li.setProperty('inputstreamaddon', 'inputstream.adaptive')
-            li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
-            li.setProperty('inputstream.adaptive.stream_headers', headers)
             li.setProperty("IsPlayable", str(True))
             xbmc.Player().play(item=play_url, listitem=li)
-        else:
-            log('inputstreamhelper check failed.')
 
 
 def play_vod(category, name, link, img, plot):
+    if not (sys.version_info[0] > 2 or sys.version_info[0] == 2 and
+            sys.version_info[1] >= 7):
+        dialog = xbmcgui.Dialog()
+        dialog.ok(
+        u'Грешка',
+        u'Вашето устройство не може да възпроизведе това видео.')
+        return
+
     device_status()
     play_param = voyo.process_play_url(link)
     if play_param:
@@ -242,7 +272,7 @@ def play_vod(category, name, link, img, plot):
         DRM = 'com.widevine.alpha'
         is_helper = inputstreamhelper.Helper(PROTOCOL, drm=DRM)
         if is_helper.check_inputstream():
-            li = xbmcgui.ListItem(label='Play( {} )'.format(name), path=play_param['play_url'])
+            li = xbmcgui.ListItem(label='Play( {0} )'.format(name), path=play_param['play_url'])
             li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
             li.setArt({'thumb':img, 'icon':'', 'fanart':''})
             li.setProperty('inputstreamaddon', 'inputstream.adaptive')
