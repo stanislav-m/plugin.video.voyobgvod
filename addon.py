@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
+#from __future__ import unicode_literals
 import sys
+import threading
 from urllib import urlencode
 from urllib import quote_plus
 from urlparse import parse_qsl
@@ -12,11 +14,86 @@ if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >
     import inputstreamhelper
     tv_only = False
 else:
-    tv_only = True 
+    tv_only = True
 import uuid
+import os
+import xbmcvfs
+import pickle
+from resources.lib.common import jsonRPC, sleep
+import json
 
 config_par = ['username', 'password', 'device']
 settings = {}
+
+_url = sys.argv[0]
+_handle = int(sys.argv[1])
+__addon__   = xbmcaddon.Addon()
+
+def get_addon():
+  return __addon__
+
+def get_addon_id():
+  return __addon__.getAddonInfo('id')
+
+def get_addon_name():
+  return __addon__.getAddonInfo('name').decode('utf-8')
+
+def get_addon_version():
+  return __addon__.getAddonInfo('version')
+
+def get_url(**kwargs):
+    return '{0}?{1}'.format(_url, urlencode(kwargs))
+
+def getUrl(keyval_pair):
+    return '{0}?{1}'.format(_url, urlencode(keyval_pair))
+
+def get_platform():
+  platforms = [
+    "Android",
+    "Linux.RaspberryPi",
+    "Linux",
+    "XBOX",
+    "Windows",
+    "ATV2",
+    "IOS",
+    "OSX",
+    "Darwin"
+   ]
+
+  for platform in platforms:
+    if xbmc.getCondVisibility('System.Platform.{0}'.format(platform)):
+      return platform
+  return "Unknown"
+
+def get_version():
+    return xbmc.getInfoLabel("System.BuildVersion")
+
+def log_primitive(msg, level):
+    if str(type(msg)) == "<type 'unicode'>":
+        s = msg.encode('utf-8')
+    else:
+        s = str(msg)
+    xbmc.log("{0} v{1} | {2}".format(get_addon_id(), get_addon_version(), s), level)
+
+def log(msg, level=xbmc.LOGDEBUG):
+    try:
+        level = xbmc.LOGNOTICE
+        if str(type(msg)) == "<type 'list'>" or str(type(msg)) == "<type 'tuple'>":
+            for m in msg:
+                log_primitive(msg, level)
+        elif str(type(msg)) == "<type 'dict'>":
+            for key in msg:
+                log_primitive('{0} : {1}'.format(key, msg[key]), level)
+        else:
+            log_primitive(msg, level)
+
+    except:
+        try:
+            import traceback
+            er = traceback.format_exc(sys.exc_info())
+            xbmc.log('%s | Logging failure: %s' % (get_addon_id(), er), level)
+        except:
+            pass
 
 class voyobg:
     def __init__(self):
@@ -68,80 +145,164 @@ def getSettings():
 
 voyo = voyobg()
 
-_url = sys.argv[0]
-_handle = int(sys.argv[1])
-__addon__   = xbmcaddon.Addon()
+loginAttemps = 0
 
 getSettings()
-while not voyo.login():
+while not voyo.login() and loginAttemps < 3:
+    loginAttemps += 1
     dialog = xbmcgui.Dialog()
     dialog.ok(u'Грешка', u'Некоректни данни за абонамент!')
     __addon__.openSettings()
     getSettings()
 
 
-def get_addon():
-  return __addon__
+def _getListItem(li):
+    return xbmc.getInfoLabel('ListItem.%s' % li).decode('utf-8')
 
-def get_addon_id():
-  return __addon__.getAddonInfo('id')
+class MyEventPlayer (xbmc.Player):
+    def __init__ (self):
+        xbmc.Player.__init__(self)
 
-def get_addon_name():
-  return __addon__.getAddonInfo('name').decode('utf-8')
+    def play(self, url, listitem):
+        log('Now im playing... %s' % url)
+        self.stopPlaying.clear()
+        xbmc.Player().play(url, listitem)
 
-def get_addon_version():
-  return __addon__.getAddonInfo('version')
+    def onPlayBackEnded( self ):
+        # Will be called when xbmc stops playing a file
+        log("seting event in onPlayBackEnded " )
+        self.stopPlaying.set();
+        log("stop Event is SET" )
 
-def get_url(**kwargs):
-    return '{0}?{1}'.format(_url, urlencode(kwargs))
+    def onPlayBackStopped( self ):
+        # Will be called when user stops xbmc playing a file
+        log("seting event in onPlayBackStopped " )
+        self.stopPlaying.set();
+        log("stop Event is SET" )
 
-def get_platform():
-  platforms = [
-    "Android",
-    "Linux.RaspberryPi",
-    "Linux",
-    "XBOX",
-    "Windows",
-    "ATV2",
-    "IOS",
-    "OSX",
-    "Darwin"
-   ]
 
-  for platform in platforms:
-    if xbmc.getCondVisibility('System.Platform.{0}'.format(platform)):
-      return platform
-  return "Unknown"
+class MyPlayer(xbmc.Player):
+    def __init__(self):
+        super(MyPlayer, self).__init__()
+        log('Player()')
+        self.pluginhandle = int(sys.argv[1])
+        self.addon = xbmcaddon.Addon()
+        self.dialog = xbmcgui.Dialog()
+        self.resumedb = os.path.join(
+            xbmc.translatePath(self.addon.getAddonInfo('profile')).decode('utf-8'),
+            'resume.json')
+        self.sleeptm = 0.2
+        self.video_lastpos = 0
+        self.video_totaltime = 0
+        self.asin = ''
+        self.interval = 180
+        self.running = False
+        self.extern = False
+        self.resume = 0
+        self.playcount= 0
+        self.play_url = ''
 
-def get_version():
-    return xbmc.getInfoLabel("System.BuildVersion")
-
-def log_primitive(msg, level):
-    if str(type(msg)) == "<type 'unicode'>":
-        s = msg.encode('utf-8')
-    else:
-        s = str(msg)
-    xbmc.log("{0} v{1} | {2}".format(get_addon_id(), get_addon_version(), s), level)
-
-def log(msg, level=xbmc.LOGDEBUG):
-    try:
-        level = xbmc.LOGNOTICE
-        if str(type(msg)) == "<type 'list'>" or str(type(msg)) == "<type 'tuple'>":
-            for m in msg:
-                log_primitive(msg, level)
-        elif str(type(msg)) == "<type 'dict'>":
-            for key in msg:
-                log_primitive('{0} : {1}'.format(key, msg[key]), level)
+    def resolve(self, li):
+        log('resolve')
+        if  not self.checkResume():
+            xbmcplugin.setResolvedUrl(self.pluginhandle, True, xbmcgui.ListItem())
+            xbmc.executebuiltin('Container.Refresh')
+            return
+        if self.resume:
+            li.setProperty('resumetime', str(self.resume))
+            li.setProperty('totaltime', '1')
+            log('Resuming Video at %s' % self.resume)
         else:
-            log_primitive(msg, level)
+            self.resume = 0
+        #xbmcplugin.setResolvedUrl(self.pluginhandle, True, li)
+        self.stop_event.clear()
+        self.play(self.play_url, li, False, 0)
+        self.running = True
+        self.getTimes('Starting Playback')
 
-    except:
-        try:
-            import traceback
-            er = traceback.format_exc(sys.exc_info())
-            xbmc.log('%s | Logging failure: %s' % (get_addon_id(), er), level)
-        except:
-            pass
+    def checkResume(self):
+        log('checkResume')
+        self.getResumePoint()
+        if self.resume > 10:
+            log('Displaying Resumedialog')
+            sel = self.dialog.contextmenu([
+                'resume from {0}'.format(time.strftime("%H:%M:%S", time.gmtime(self.resume))),
+                'start from beginning'
+            ])
+            if sel > -1:
+                self.resume = self.resume if sel == 0 else 0
+            else:
+                return False
+        return True
+
+    def getResumePoint(self):
+        if not xbmcvfs.exists(self.resumedb):
+            log('no resume file')
+            return {}
+        with open(self.resumedb, 'r') as fp:
+            s = fp.read()
+            if len(s) > 0:
+                items = json.loads(s)
+                if self.play_url in items:
+                    self.resume = items[self.play_url]['resume']
+                    log('found resume point for {0} at {1}'.format(
+                        self.play_url, self.resume))
+                return items
+            return {}
+
+    def saveResumePoint(self):
+        items = self.getResumePoint()
+        with open(self.resumedb, 'w+') as fp:
+            if self.play_url in items.keys():
+                del items[self.play_url]
+            else:
+                items.update({self.play_url: {'resume': self.video_lastpos}})
+            s = json.dumps(items)
+            fp.write(s)
+
+    def onPlayBackEnded(self):
+        log('onPlayBackEnded')
+        self.finished()
+        log('after finished')
+
+    def onPlayBackStopped(self):
+        log('onPlayBackStopped')
+        self.finished()
+        log('after finished')
+
+    def onPlayBackStarted(self):
+        log('onPlayBackStarted')
+
+    def onPlayBackError(self):
+        log('Error detected')
+
+    def onPlayBackPaused(self):
+        log('Paused')
+        self.saveResumePoint()
+
+    def finished(self):
+        log('finished()')
+        if self.video_lastpos > 0 and self.video_totaltime > 0:
+            self.playcount += 1 if (self.video_lastpos * 100) / self.video_totaltime >= 90 else 0
+            self.saveResumePoint()
+        self.running = False
+        self.stop_event.set()
+        log('finished and saved')
+
+    def getTimes(self, msg):
+        log('getTimes')
+        while self.video_totaltime <= 0 and self.running:
+            sleep(self.sleeptm)
+            if self.isPlaying():
+                self.video_totaltime = self.getTotalTime()
+                self.video_lastpos = self.getTime()
+            log('{} -- {}'.format(self.video_lastpos, self.video_totaltime))
+        if msg == 'Starting Playback' and self.resume > 0:
+            self.seekTime(self.resume)
+            msg.replace('Starting', 'Resuming')
+            self.video_lastpos = self.resume
+        log('{0}: {1}/{2}'.format(msg, self.video_lastpos, self.video_totaltime))
+
 
 
 def list_categories():
@@ -175,11 +336,15 @@ def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
     ctxtmenu.append(('Информация', 'XBMC.Action(Info)'))
     li.addContextMenuItems(ctxtmenu)
 
-    url = get_url(action=act_str, category=link.replace('/', '_'),
-                  name=name, img=img, plot=plot, link=link)
+    dict_url = {'action' : act_str, 'category': link.replace('/', '_'),
+                'name' : name, 'img' : img, 'plot' : plot, 'link' :link}
+    if meta_inf:
+        dict_url.update(meta_inf)
+    url = getUrl(dict_url)
     xbmcplugin.addDirectoryItem(_handle, url, li, True)
 
-def list_content(category):
+def list_content(params):
+    category = params['category']
     cat_link = category.replace('_', '/')
     xbmcplugin.setPluginCategory(_handle, category)
     xbmcplugin.setContent(_handle, 'videos')
@@ -228,34 +393,64 @@ def device_status():
             dialog.ok(u'Грешка', u'Неуспешно изтриване на устройство.')
 
 
-def play_tv(category, name, link, img, plot):
+def play_tv(params):
+    category = params['category']
     device_status()
-    play_url = voyo.channel(link)
+    metaflds = ['genre', 'country', 'rating', 'year', 'duration',
+                'plot']
+    inf_labels = {}
+    for mf in metaflds:
+        if mf in params:
+            inf_labels[mf] = params[mf]
+
+    play_url = voyo.channel(params['link'])
     if play_url:
         headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
         if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
             PROTOCOL = 'hls'
             is_helper = inputstreamhelper.Helper(PROTOCOL)
             if is_helper.check_inputstream():
-                li = xbmcgui.ListItem(label=name, path=play_url)
-                li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
-                li.setArt({'thumb':img, 'icon':'', 'fanart':''})
+                li = xbmcgui.ListItem(label=params['name'], path=play_url)
+                li.setInfo(type="Video", infoLabels=inf_labels)
+                li.setArt({'thumb': params['img'],
+                           'icon': params['img'],
+                           'fanart': params['img']})
                 li.setProperty('inputstreamaddon', 'inputstream.adaptive')
                 li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
                 li.setProperty('inputstream.adaptive.stream_headers', headers)
                 li.setProperty("IsPlayable", str(True))
+
+                #stopPlaying=threading.Event()
+                #tvplayer = MyEventPlayer()
+                #tvplayer.stopPlaying = stopPlaying
+                #tvplayer.play(play_url, li)
+
+                #firstTime=True
+                #while True:
+                #    if stopPlaying.isSet():
+                #        break;
+                #    log('Sleeping...')
+                #    xbmc.sleep(200)
+                #    if firstTime:
+                #        xbmc.executebuiltin('Dialog.Close(all,True)')
+                #        firstTime=False
+                #stopPlaying.isSet()
+                #log('job done')
                 xbmc.Player().play(item=play_url, listitem=li)
             else:
                 log('inputstreamhelper check failed.')
         else:
-            li = xbmcgui.ListItem(label=name, path=play_url)
-            li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
-            li.setArt({'thumb':img, 'icon':'', 'fanart':''})
+            li = xbmcgui.ListItem(label=params['name'], path=play_url)
+            li.setInfo(type="Video", infoLabels=inf_labels)
+            li.setArt({'thumb': params['img'],
+                       'icon': params['img'],
+                       'fanart': params['img']})
             li.setProperty("IsPlayable", str(True))
             xbmc.Player().play(item=play_url, listitem=li)
 
 
-def play_vod(category, name, link, img, plot):
+def play_vod(params):
+    category = params['category']
     if not (sys.version_info[0] > 2 or sys.version_info[0] == 2 and
             sys.version_info[1] >= 7):
         dialog = xbmcgui.Dialog()
@@ -265,16 +460,25 @@ def play_vod(category, name, link, img, plot):
         return
 
     device_status()
-    play_param = voyo.process_play_url(link)
+    play_param = voyo.process_play_url(params['link'])
     if play_param:
         headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
         PROTOCOL = 'mpd'
         DRM = 'com.widevine.alpha'
         is_helper = inputstreamhelper.Helper(PROTOCOL, drm=DRM)
         if is_helper.check_inputstream():
-            li = xbmcgui.ListItem(label='Play( {0} )'.format(name), path=play_param['play_url'])
-            li.setInfo(type="Video", infoLabels={"Title":name, "Plot":plot})
-            li.setArt({'thumb':img, 'icon':'', 'fanart':''})
+            metaflds = ['genre', 'country', 'rating', 'year', 'duration',
+                        'plot']
+            li = xbmcgui.ListItem(label='Play( {0} )'.format(params['name']),
+                                  path=play_param['play_url'])
+            inf_labels = {}
+            for mf in metaflds:
+                if mf in params:
+                    inf_labels[mf] = params[mf]
+            li.setInfo(type="Video", infoLabels=inf_labels)
+            li.setArt({'thumb': params['img'],
+                       'icon': params['img'],
+                       'fanart': params['img']})
             li.setProperty('inputstreamaddon', 'inputstream.adaptive')
             li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
             li.setProperty('inputstream.adaptive.stream_headers', headers)
@@ -283,7 +487,37 @@ def play_vod(category, name, link, img, plot):
             li.setProperty('inputstream.adaptive.license_key', licURL)
             li.setMimeType('application/dash+xml')
             li.setProperty("IsPlayable", str(True))
-            xbmc.Player().play(item=play_param['play_url'], listitem=li)
+            li.setContentLookup(False)
+            #xbmc.Player().play(item=play_param['play_url'], listitem=li)
+            log('about to play {} '.format(play_param['play_url']))
+            stop_play=threading.Event()
+            vod_player = MyPlayer()
+            vod_player.stop_event = stop_play
+            vod_player.asin = params['name']
+            vod_player.play_url = play_param['play_url']
+            vod_player.resolve(li)
+            starttime = time.time()
+
+            firstTime = True
+            log('starting while loop')
+            while not xbmc.abortRequested and vod_player.running:
+                if stop_play.isSet():
+                    break;
+                if vod_player.isPlayingVideo():
+                    vod_player.video_lastpos = vod_player.getTime()
+                    if time.time() > starttime + vod_player.interval:
+                        starttime = time.time()
+                else:
+                    log('not Playing. last pos: {0}'.format(
+                        vod_player.video_lastpos))
+                if firstTime:
+                    xbmc.executebuiltin('Dialog.Close(all,True)')
+                    fisrtTime = False
+                sleep(2)
+            log('out of the loop')
+            vod_player.finished()
+            #del vod_player
+
     else:
         dialog = xbmcgui.Dialog()
         dialog.ok(
@@ -295,13 +529,11 @@ def router(paramstring):
     params = dict(parse_qsl(paramstring))
     if params:
         if params['action'] == 'listing_sections':
-            list_content(params['category'])
+            list_content(params)
         elif params['action'] == 'play_vod':
-            play_vod(params['category'], params['name'], params['link'],
-                    params['img'], params['plot'])
+            play_vod(params)
         elif params['action'] == 'play_tv':
-            play_tv(params['category'], params['name'], params['link'],
-                    params['img'], '') #params['plot'])
+            play_tv(params)
         else:
             raise ValueError('Invalid paramstring: {0}!'.format(paramstring))
     else:
