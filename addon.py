@@ -68,6 +68,13 @@ def get_platform():
 def get_version():
     return xbmc.getInfoLabel("System.BuildVersion")
 
+def get_prn(msg):
+    if str(type(msg)) == "<type 'unicode'>":
+        s = msg.encode('utf-8')
+    else:
+        s = str(msg)
+    return s
+
 def log_primitive(msg, level):
     if str(type(msg)) == "<type 'unicode'>":
         s = msg.encode('utf-8')
@@ -83,7 +90,8 @@ def log(msg, level=xbmc.LOGDEBUG):
                 log_primitive(msg, level)
         elif str(type(msg)) == "<type 'dict'>":
             for key in msg:
-                log_primitive('{0} : {1}'.format(key, msg[key]), level)
+                log_primitive('{0} : {1}'.format(
+                    get_prn(key), get_prn(msg[key])), level)
         else:
             log_primitive(msg, level)
 
@@ -145,6 +153,22 @@ def getSettings():
 
 voyo = voyobg()
 
+def getResumeInfo():
+    resumedb = os.path.join(
+            xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8'),
+            'resume.json')
+    if not xbmcvfs.exists(resumedb):
+        log('no resume file')
+        return {}
+    with open(resumedb, 'r') as fp:
+        s = fp.read()
+        if len(s) > 0:
+            items = json.loads(s)
+            log(items)
+            return items
+
+itemsWatchInfo = getResumeInfo()
+
 loginAttemps = 0
 
 getSettings()
@@ -201,6 +225,7 @@ class MyPlayer(xbmc.Player):
         self.resume = 0
         self.playcount= 0
         self.play_url = ''
+        self.items = None
 
     def resolve(self, li):
         log('resolve')
@@ -216,7 +241,7 @@ class MyPlayer(xbmc.Player):
             self.resume = 0
         #xbmcplugin.setResolvedUrl(self.pluginhandle, True, li)
         self.stop_event.clear()
-        self.play(self.play_url, li, False, 0)
+        self.play(self.play_url, li)
         self.running = True
         self.getTimes('Starting Playback')
 
@@ -236,28 +261,21 @@ class MyPlayer(xbmc.Player):
         return True
 
     def getResumePoint(self):
-        if not xbmcvfs.exists(self.resumedb):
-            log('no resume file')
-            return {}
-        with open(self.resumedb, 'r') as fp:
-            s = fp.read()
-            if len(s) > 0:
-                items = json.loads(s)
-                if self.play_url in items:
-                    self.resume = items[self.play_url]['resume']
-                    log('found resume point for {0} at {1}'.format(
-                        self.play_url, self.resume))
-                return items
-            return {}
+        if self.asin in self.items:
+            self.resume = items[self.asin]['resume']
+            log('found resume point for {0} at {1}'.format(
+                self.asin, self.resume))
+        else:
+            log('can''t find {0} in resumedb'.format(self.asin))
 
     def saveResumePoint(self):
-        items = self.getResumePoint()
         with open(self.resumedb, 'w+') as fp:
-            if self.play_url in items.keys():
-                del items[self.play_url]
+            if self.play_url in self.items.keys():
+                del self.items[self.asin]
             else:
-                items.update({self.play_url: {'resume': self.video_lastpos}})
-            s = json.dumps(items)
+                self.items.update({self.asin: {'resume': self.video_lastpos,
+                                              'playcount': self.playcount}})
+            s = json.dumps(self.items)
             fp.write(s)
 
     def onPlayBackEnded(self):
@@ -331,7 +349,13 @@ def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
     info_labels = {'title': name, 'plot': plot}
     if meta_inf:
         info_labels.update(meta_inf)
+
+    if name in itemsWatchInfo:
+        li.setProperty('resumetime', str(itemsWatchInfo[name]['resume']))
+        li.setProperty('totaltime', '1')
+        info_labels['playcount'] = itemsWatchInfo[name]['playcount']
     li.setInfo('video', info_labels)
+
     ctxtmenu = []
     ctxtmenu.append(('Информация', 'XBMC.Action(Info)'))
     li.addContextMenuItems(ctxtmenu)
@@ -380,7 +404,7 @@ def device_status():
     dialog = xbmcgui.Dialog()
     while not voyo.check_device():
         dialog.ok(
-        u'Грешка', 
+        u'Грешка',
         u'Достигнал си максималния брой устройства, които могат да ползваш с този абонамент.',
         u'Моля избери и изтрий устройство, за да продължиш да гледаш.'
         )
@@ -493,7 +517,8 @@ def play_vod(params):
             stop_play=threading.Event()
             vod_player = MyPlayer()
             vod_player.stop_event = stop_play
-            vod_player.asin = params['name']
+            vod_player.asin = get_prn(params['name'])
+            vod_player.items = itemsWatchInfo
             vod_player.play_url = play_param['play_url']
             vod_player.resolve(li)
             starttime = time.time()
@@ -513,7 +538,7 @@ def play_vod(params):
                 if firstTime:
                     xbmc.executebuiltin('Dialog.Close(all,True)')
                     fisrtTime = False
-                sleep(2)
+                sleep(5)
             log('out of the loop')
             vod_player.finished()
             #del vod_player
