@@ -156,16 +156,17 @@ voyo = voyobg()
 def getResumeInfo():
     resumedb = os.path.join(
             xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8'),
-            'resume.json')
+            'resume.db')
     if not xbmcvfs.exists(resumedb):
         log('no resume file')
         return {}
     with open(resumedb, 'r') as fp:
-        s = fp.read()
-        if len(s) > 0:
-            items = json.loads(s)
-            log(items)
-            return items
+        items = pickle.load(fp)
+        log(items)
+        return items
+        #s = fp.read()
+        #if len(s) > 0:
+        #    items = json.loads(s)
 
 itemsWatchInfo = getResumeInfo()
 
@@ -214,7 +215,7 @@ class MyPlayer(xbmc.Player):
         self.dialog = xbmcgui.Dialog()
         self.resumedb = os.path.join(
             xbmc.translatePath(self.addon.getAddonInfo('profile')).decode('utf-8'),
-            'resume.json')
+            'resume.db')
         self.sleeptm = 0.2
         self.video_lastpos = 0
         self.video_totaltime = 0
@@ -262,7 +263,7 @@ class MyPlayer(xbmc.Player):
 
     def getResumePoint(self):
         if self.asin in self.items:
-            self.resume = items[self.asin]['resume']
+            self.resume = self.items[self.asin]['resume']
             log('found resume point for {0} at {1}'.format(
                 self.asin, self.resume))
         else:
@@ -275,8 +276,9 @@ class MyPlayer(xbmc.Player):
             else:
                 self.items.update({self.asin: {'resume': self.video_lastpos,
                                               'playcount': self.playcount}})
-            s = json.dumps(self.items)
-            fp.write(s)
+            #s = json.dumps(self.items)
+            #fp.write(s)
+            pickle.dump(self.items, fp, 2)
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
