@@ -282,17 +282,6 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
             return self.__get_product_url(pl_par['product'], pl_par['unit'], media,
                 pl_par['site'], pl_par['section'], self.__settings['device'])
 
-    def __process_series(self, soup):
-        ps = soup.find('div', class_=re.compile('^productsList'))
-        series = ps.find_all('li', class_='item')
-        products = []
-        for item in series:
-            name = item.div.a.img['title'].encode(self.__res.encoding)
-            link = item.div.a['href']
-            img = item.div.a.img['src']
-            products.append((name, link, img))
-        return products
-
     def process_play_url(self, href):
         self.__res = self.__ses.post(href)
         product_list = []
@@ -308,7 +297,7 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
                         pl_par['site'], pl_par['section'], self.__settings['device'])
             return None
 
-    def __play_title(self, soup):
+    def __find_meta(self, soup):
         meta = soup.find_all('meta', property=re.compile('^og'))
         title = ''
         img = ''
@@ -324,31 +313,53 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
             elif m['property'] == "og:description":
                 plot = m['content']
 
-        cls_descr = soup.find('div', class_='description')
-        sp = cls_descr.find_all('span')
-        extra_attr = {}
-        for c in sp:
-            for k in c.attrs:
-                v = c[k]
-                extra_attr[v[0].encode(self.__res.encoding)] = c.text.encode(self.__res.encoding)
         meta_info = {}
-        for k in extra_attr:
-            v = extra_attr[k]
-            if k == 'genres':
-                meta_info['genre'] = v
-            elif k == 'country':
-                meta_info[k] = v
-            elif k == 'label':
-                meta_info['rating'] = (float(v)*10)/5
-            elif k == 'year':
-                meta_info[k] = v.split()[0]
-            elif k == 'duration':
-                meta_info[k] = int(v.split()[0]) * 60
+        cls_descr = soup.find('div', class_='description')
+        if cls_descr != None:
+            sp = cls_descr.find_all('span')
+            extra_attr = {}
+            for c in sp:
+                for k in c.attrs:
+                    v = c[k]
+                    extra_attr[v[0].encode(self.__res.encoding)] = c.text.encode(self.__res.encoding)
+            for k in extra_attr:
+                v = extra_attr[k]
+                if k == 'genres':
+                    meta_info['genre'] = ' '.join(v.split()).strip()
+                elif k == 'country':
+                    meta_info[k] = v
+                elif k == 'label':
+                    meta_info['rating'] = (float(v)*10)/5
+                elif k == 'year':
+                    meta_info[k] = v.split()[0]
+                elif k == 'duration':
+                    meta_info[k] = int(v.split()[0]) * 60
+            if len(plot) > 0:
+                meta_info['plot'] = plot.encode(self.__res.encoding)
 
         return (title.encode(self.__res.encoding),
                 url.encode(self.__res.encoding).replace('http://', 'https://'),
                 img.encode(self.__res.encoding),
                 plot.encode(self.__res.encoding), meta_info)
+
+    def __process_series(self, soup):
+        ps = soup.find('div', class_=re.compile('^productsList'))
+        series = ps.find_all('li', class_='item')
+        products = []
+        for item in series:
+            name = item.div.a.img['title'].encode(self.__res.encoding)
+            link = item.div.a['href']
+            img = item.div.a.img['src']
+            products.append((name, link, img))
+        title, url, img, plot, meta_info =  self.__find_meta(soup)
+        return products, meta_info
+
+    def __play_title(self, soup):
+        return self.__find_meta(soup)
+        #return (title.encode(self.__res.encoding),
+        #        url.encode(self.__res.encoding).replace('http://', 'https://'),
+        #        img.encode(self.__res.encoding),
+        #        plot.encode(self.__res.encoding), meta_info)
 
     def list_series(self, href):
         url = 'https://voyo.bg{0}'.format(href)
@@ -367,4 +378,6 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
             if check_player == None:
                 return self.__process_series(soup)
             else:
-                return self.__play_title(soup)
+                title, url_ref, img, plot, metadt =  self.__play_title(soup)
+                play_params = self.process_play_url(url_ref)
+                return title, url_ref, img, plot, metadt, play_params

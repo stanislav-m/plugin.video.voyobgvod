@@ -16,11 +16,6 @@ if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >
 else:
     tv_only = True
 import uuid
-import os
-import xbmcvfs
-import pickle
-from resources.lib.common import jsonRPC, sleep
-import json
 
 config_par = ['username', 'password', 'device']
 settings = {}
@@ -153,23 +148,6 @@ def getSettings():
 
 voyo = voyobg()
 
-def getResumeInfo():
-    resumedb = os.path.join(
-            xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8'),
-            'resume.db')
-    if not xbmcvfs.exists(resumedb):
-        log('no resume file')
-        return {}
-    with open(resumedb, 'r') as fp:
-        items = pickle.load(fp)
-        log(items)
-        return items
-        #s = fp.read()
-        #if len(s) > 0:
-        #    items = json.loads(s)
-
-itemsWatchInfo = getResumeInfo()
-
 loginAttemps = 0
 
 getSettings()
@@ -183,146 +161,6 @@ while not voyo.login() and loginAttemps < 3:
 
 def _getListItem(li):
     return xbmc.getInfoLabel('ListItem.%s' % li).decode('utf-8')
-
-class MyEventPlayer (xbmc.Player):
-    def __init__ (self):
-        xbmc.Player.__init__(self)
-
-    def play(self, url, listitem):
-        log('Now im playing... %s' % url)
-        self.stopPlaying.clear()
-        xbmc.Player().play(url, listitem)
-
-    def onPlayBackEnded( self ):
-        # Will be called when xbmc stops playing a file
-        log("seting event in onPlayBackEnded " )
-        self.stopPlaying.set();
-        log("stop Event is SET" )
-
-    def onPlayBackStopped( self ):
-        # Will be called when user stops xbmc playing a file
-        log("seting event in onPlayBackStopped " )
-        self.stopPlaying.set();
-        log("stop Event is SET" )
-
-
-class MyPlayer(xbmc.Player):
-    def __init__(self):
-        super(MyPlayer, self).__init__()
-        log('Player()')
-        self.pluginhandle = int(sys.argv[1])
-        self.addon = xbmcaddon.Addon()
-        self.dialog = xbmcgui.Dialog()
-        self.resumedb = os.path.join(
-            xbmc.translatePath(self.addon.getAddonInfo('profile')).decode('utf-8'),
-            'resume.db')
-        self.sleeptm = 0.2
-        self.video_lastpos = 0
-        self.video_totaltime = 0
-        self.asin = ''
-        self.interval = 180
-        self.running = False
-        self.extern = False
-        self.resume = 0
-        self.playcount= 0
-        self.play_url = ''
-        self.items = None
-
-    def resolve(self, li):
-        log('resolve')
-        if  not self.checkResume():
-            xbmcplugin.setResolvedUrl(self.pluginhandle, True, xbmcgui.ListItem())
-            xbmc.executebuiltin('Container.Refresh')
-            return
-        if self.resume:
-            li.setProperty('resumetime', str(self.resume))
-            li.setProperty('totaltime', '1')
-            log('Resuming Video at %s' % self.resume)
-        else:
-            self.resume = 0
-        #xbmcplugin.setResolvedUrl(self.pluginhandle, True, li)
-        self.stop_event.clear()
-        self.play(self.play_url, li)
-        self.running = True
-        self.getTimes('Starting Playback')
-
-    def checkResume(self):
-        log('checkResume')
-        self.getResumePoint()
-        if self.resume > 10:
-            log('Displaying Resumedialog')
-            sel = self.dialog.contextmenu([
-                'resume from {0}'.format(time.strftime("%H:%M:%S", time.gmtime(self.resume))),
-                'start from beginning'
-            ])
-            if sel > -1:
-                self.resume = self.resume if sel == 0 else 0
-            else:
-                return False
-        return True
-
-    def getResumePoint(self):
-        if self.asin in self.items:
-            self.resume = self.items[self.asin]['resume']
-            log('found resume point for {0} at {1}'.format(
-                self.asin, self.resume))
-        else:
-            log('can''t find {0} in resumedb'.format(self.asin))
-
-    def saveResumePoint(self):
-        with open(self.resumedb, 'w+') as fp:
-            if self.play_url in self.items.keys():
-                del self.items[self.asin]
-            else:
-                self.items.update({self.asin: {'resume': self.video_lastpos,
-                                              'playcount': self.playcount}})
-            #s = json.dumps(self.items)
-            #fp.write(s)
-            pickle.dump(self.items, fp, 2)
-
-    def onPlayBackEnded(self):
-        log('onPlayBackEnded')
-        self.finished()
-        log('after finished')
-
-    def onPlayBackStopped(self):
-        log('onPlayBackStopped')
-        self.finished()
-        log('after finished')
-
-    def onPlayBackStarted(self):
-        log('onPlayBackStarted')
-
-    def onPlayBackError(self):
-        log('Error detected')
-
-    def onPlayBackPaused(self):
-        log('Paused')
-        self.saveResumePoint()
-
-    def finished(self):
-        log('finished()')
-        if self.video_lastpos > 0 and self.video_totaltime > 0:
-            self.playcount += 1 if (self.video_lastpos * 100) / self.video_totaltime >= 90 else 0
-            self.saveResumePoint()
-        self.running = False
-        self.stop_event.set()
-        log('finished and saved')
-
-    def getTimes(self, msg):
-        log('getTimes')
-        while self.video_totaltime <= 0 and self.running:
-            sleep(self.sleeptm)
-            if self.isPlaying():
-                self.video_totaltime = self.getTotalTime()
-                self.video_lastpos = self.getTime()
-            log('{} -- {}'.format(self.video_lastpos, self.video_totaltime))
-        if msg == 'Starting Playback' and self.resume > 0:
-            self.seekTime(self.resume)
-            msg.replace('Starting', 'Resuming')
-            self.video_lastpos = self.resume
-        log('{0}: {1}/{2}'.format(msg, self.video_lastpos, self.video_totaltime))
-
 
 
 def list_categories():
@@ -343,7 +181,7 @@ def list_categories():
         xbmcplugin.addDirectoryItem(_handle, url, li, is_folder)
     xbmcplugin.endOfDirectory(_handle)
 
-def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
+def list_item(name, link, img, plot, act_str, meta_inf=None):
     log('{0} :  {1} - {2}'.format(name, link, img))
     li = xbmcgui.ListItem(label=name)
     art = { 'thumb': img, 'poster': img, 'banner' : img, 'fanart': img }
@@ -352,10 +190,6 @@ def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
     if meta_inf:
         info_labels.update(meta_inf)
 
-    if name in itemsWatchInfo:
-        li.setProperty('resumetime', str(itemsWatchInfo[name]['resume']))
-        li.setProperty('totaltime', '1')
-        info_labels['playcount'] = itemsWatchInfo[name]['playcount']
     li.setInfo('video', info_labels)
 
     ctxtmenu = []
@@ -369,6 +203,48 @@ def list_item(name, link, img, plot, act_str, playable, meta_inf=None):
     url = getUrl(dict_url)
     xbmcplugin.addDirectoryItem(_handle, url, li, True)
 
+def list_play_url(name, link, img, plot, meta_inf, play_param):
+    log('{0} - {1}'.format(name, play_param['play_url']))
+    if not (sys.version_info[0] > 2 or sys.version_info[0] == 2 and
+            sys.version_info[1] >= 7):
+        dialog = xbmcgui.Dialog()
+        dialog.ok(
+        u'Грешка',
+        u'Вашето устройство не може да възпроизведе това видео.')
+        return
+
+    device_status()
+    if play_param:
+        headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
+        PROTOCOL = 'mpd'
+        DRM = 'com.widevine.alpha'
+        is_helper = inputstreamhelper.Helper(PROTOCOL, drm=DRM)
+        if is_helper.check_inputstream():
+            metaflds = ['genre', 'country', 'rating', 'year', 'duration',
+                        'plot']
+            li = xbmcgui.ListItem(label=name, path=play_param['play_url'])
+            inf_labels = {}
+            for mf in metaflds:
+                if mf in meta_inf:
+                    inf_labels[mf] = meta_inf[mf]
+            li.setInfo(type="Video", infoLabels=inf_labels)
+            li.setArt({'thumb': img, 'icon': img, 'fanart': img})
+            li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+            li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
+            li.setProperty('inputstream.adaptive.stream_headers', headers)
+            li.setProperty('inputstream.adaptive.license_type', DRM)
+            licURL = play_param['license_url'] + '||R{SSM}|BJBwvlic'
+            li.setProperty('inputstream.adaptive.license_key', licURL)
+            li.setMimeType('application/dash+xml')
+            li.setProperty("IsPlayable", str(True))
+            xbmcplugin.addDirectoryItem(_handle, play_param['play_url'], li)
+    else:
+        dialog = xbmcgui.Dialog()
+        dialog.ok(
+        u'Грешка',
+        u'Видеото не е налично.')
+
+
 def list_content(params):
     category = params['category']
     cat_link = category.replace('_', '/')
@@ -379,19 +255,19 @@ def list_content(params):
         action_str = 'play_tv'
         for cont in content:
             name, link, img = cont
-            list_item(name, link, img, '', action_str, False)
+            list_item(name, link, img, '', action_str)
     else:
-        content = voyo.process_page(cat_link)
-        if content:
-            if str(type(content)) == "<type 'list'>":
+        ret = voyo.process_page(cat_link)
+        if ret:
+            if len(ret) == 2:
                 action_str = 'listing_sections'
+                content, meta = ret
                 for cont in content:
                     name, link, img = cont
-                    list_item(name, link, img, '', action_str, False)
+                    list_item(name, link, img, '', action_str, meta)
             else:
-                action_str = 'play_vod'
-                name, link, img, plot, meta = content
-                list_item(name, link, img, plot, action_str, False, meta)
+                name, link, img, plot, meta, play_param = ret
+                list_play_url(name, link, img, plot, meta, play_param)
         else:
             dialog = xbmcgui.Dialog()
             dialog.ok(
@@ -417,7 +293,6 @@ def device_status():
         i = dialog.select(u'Избери устройство за изтриване:', dev_lst)
         if not voyo.remove_device(devices[i][3]):
             dialog.ok(u'Грешка', u'Неуспешно изтриване на устройство.')
-
 
 def play_tv(params):
     category = params['category']
@@ -445,23 +320,6 @@ def play_tv(params):
                 li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
                 li.setProperty('inputstream.adaptive.stream_headers', headers)
                 li.setProperty("IsPlayable", str(True))
-
-                #stopPlaying=threading.Event()
-                #tvplayer = MyEventPlayer()
-                #tvplayer.stopPlaying = stopPlaying
-                #tvplayer.play(play_url, li)
-
-                #firstTime=True
-                #while True:
-                #    if stopPlaying.isSet():
-                #        break;
-                #    log('Sleeping...')
-                #    xbmc.sleep(200)
-                #    if firstTime:
-                #        xbmc.executebuiltin('Dialog.Close(all,True)')
-                #        firstTime=False
-                #stopPlaying.isSet()
-                #log('job done')
                 xbmc.Player().play(item=play_url, listitem=li)
             else:
                 log('inputstreamhelper check failed.')
@@ -474,98 +332,17 @@ def play_tv(params):
             li.setProperty("IsPlayable", str(True))
             xbmc.Player().play(item=play_url, listitem=li)
 
-
-def play_vod(params):
-    category = params['category']
-    if not (sys.version_info[0] > 2 or sys.version_info[0] == 2 and
-            sys.version_info[1] >= 7):
-        dialog = xbmcgui.Dialog()
-        dialog.ok(
-        u'Грешка',
-        u'Вашето устройство не може да възпроизведе това видео.')
-        return
-
-    device_status()
-    play_param = voyo.process_play_url(params['link'])
-    if play_param:
-        headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
-        PROTOCOL = 'mpd'
-        DRM = 'com.widevine.alpha'
-        is_helper = inputstreamhelper.Helper(PROTOCOL, drm=DRM)
-        if is_helper.check_inputstream():
-            metaflds = ['genre', 'country', 'rating', 'year', 'duration',
-                        'plot']
-            li = xbmcgui.ListItem(label='Play( {0} )'.format(params['name']),
-                                  path=play_param['play_url'])
-            inf_labels = {}
-            for mf in metaflds:
-                if mf in params:
-                    inf_labels[mf] = params[mf]
-            li.setInfo(type="Video", infoLabels=inf_labels)
-            li.setArt({'thumb': params['img'],
-                       'icon': params['img'],
-                       'fanart': params['img']})
-            li.setProperty('inputstreamaddon', 'inputstream.adaptive')
-            li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
-            li.setProperty('inputstream.adaptive.stream_headers', headers)
-            li.setProperty('inputstream.adaptive.license_type', DRM)
-            licURL = play_param['license_url'] + '||R{SSM}|BJBwvlic'
-            li.setProperty('inputstream.adaptive.license_key', licURL)
-            li.setMimeType('application/dash+xml')
-            li.setProperty("IsPlayable", str(True))
-            li.setContentLookup(False)
-            #xbmc.Player().play(item=play_param['play_url'], listitem=li)
-            log('about to play {} '.format(play_param['play_url']))
-            stop_play=threading.Event()
-            vod_player = MyPlayer()
-            vod_player.stop_event = stop_play
-            vod_player.asin = get_prn(params['name'])
-            vod_player.items = itemsWatchInfo
-            vod_player.play_url = play_param['play_url']
-            vod_player.resolve(li)
-            starttime = time.time()
-
-            firstTime = True
-            log('starting while loop')
-            while not xbmc.abortRequested and vod_player.running:
-                if stop_play.isSet():
-                    break;
-                if vod_player.isPlayingVideo():
-                    vod_player.video_lastpos = vod_player.getTime()
-                    if time.time() > starttime + vod_player.interval:
-                        starttime = time.time()
-                else:
-                    log('not Playing. last pos: {0}'.format(
-                        vod_player.video_lastpos))
-                if firstTime:
-                    xbmc.executebuiltin('Dialog.Close(all,True)')
-                    fisrtTime = False
-                sleep(5)
-            log('out of the loop')
-            vod_player.finished()
-            #del vod_player
-
-    else:
-        dialog = xbmcgui.Dialog()
-        dialog.ok(
-        u'Грешка',
-        u'Видеото не е налично.')
-
-
 def router(paramstring):
     params = dict(parse_qsl(paramstring))
     if params:
         if params['action'] == 'listing_sections':
             list_content(params)
-        elif params['action'] == 'play_vod':
-            play_vod(params)
         elif params['action'] == 'play_tv':
             play_tv(params)
         else:
             raise ValueError('Invalid paramstring: {0}!'.format(paramstring))
     else:
         list_categories()
-
 
 if __name__ == '__main__':
     router(sys.argv[2][1:])
