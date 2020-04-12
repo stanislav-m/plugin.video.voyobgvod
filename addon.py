@@ -184,6 +184,7 @@ class voyo_plugin:
             settings[key] = __addon__.getSetting(key)
 
     def getSavedTV(self):
+        tvdb_exists = False
         tvdb = os.path.join(self.wrkdir, 'voyotv.json')
         if xbmcvfs.exists(tvdb):
             mtime = os.path.getmtime(tvdb)
