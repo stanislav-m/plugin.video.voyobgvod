@@ -279,12 +279,15 @@ class voyo_plugin:
             'ring': "RING", 'voyo-cinema':"VoyoCinema"
         }
         if play_url:
+            chan_epg = []
             epg_str = ''
             offset = -2*60*60 # to be defined externally
             if name in tvmapping:
                 name = tvmapping[name]
-                img = self.logos[name]
-                chan_epg = self.epg[name]
+                if name in self.logos:
+                    img = self.logos[name]
+                if name in self.epg:
+                    chan_epg = self.epg[name]
                 cnt = 0
                 now = time.time()
                 for it in chan_epg:
