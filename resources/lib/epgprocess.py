@@ -40,7 +40,7 @@ class voyo_epg(threading.Thread):
         return False
 
     def __unpack(self):
-        with gzip.open(self.__gzfile, "rb") as f:
+        with gzip.GzipFile(self.__gzfile, "rb") as f:
             try:
                 content = f.read()
                 with open(self.__xmlepg, 'wb') as xmlf:

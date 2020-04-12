@@ -228,8 +228,11 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
             for chan in channels:
                 item_list = chan.find_all('li')
                 for it in item_list:
-                    channel_list.append((it['class'][0], it.a['href'],
-                           'https://voyo.bg{0}'.format(it.a.div.img['src'])))
+                    name = it['class'][0]
+                    link = it.a['href']
+                    img = 'https://voyo.bg{0}'.format(it.a.div.img['src'])
+                    play_url = self.channel_url(link)
+                    channel_list.append((name, url, img, play_url))
         return channel_list
 
     def __play_link(self, soup):
