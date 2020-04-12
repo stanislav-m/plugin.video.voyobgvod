@@ -154,14 +154,21 @@ class voyo_plugin:
         self.epg.join()
 
         logofname = '{0}logos.json'.format(self.wrkdir)
-        with open(logofname, 'r') as f:
-            logostr = f.read()
-            self.logos = json.loads(logostr)
+        if xbmcvfs.exists(logofname):
+            with open(logofname, 'r') as f:
+                logostr = f.read()
+                self.logos = json.loads(logostr)
+        else:
+            self.logos = {}
 
         epgfname = '{0}epg.json'.format(self.wrkdir)
-        with codecs.open(epgfname, 'r', 'utf-8') as f:
-            epgs = f.read()
-            self.epg = json.loads(epgs)
+        if xbmcvfs.exists(epgfname):
+            with codecs.open(epgfname, 'r', 'utf-8') as f:
+                epgs = f.read()
+                self.epg = json.loads(epgs)
+        else:
+            self.epg = {}
+
 
     def getSettings(self):
         for key in config_par:
