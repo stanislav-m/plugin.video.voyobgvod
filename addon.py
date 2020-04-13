@@ -301,7 +301,7 @@ class voyo_plugin:
         if play_url:
             chan_epg = []
             epg_str = ''
-            offset = self.epgOffset
+            offset = self.epgOffset * 60 * 60
             if self.useEPG:
                 if name in tvmapping:
                     name = tvmapping[name]
