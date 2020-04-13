@@ -21,7 +21,8 @@ import uuid
 import json
 import codecs
 
-config_par = ['username', 'password', 'device']
+config_par = ['username', 'password', 'device', 'useEPG', 'epgURL',
+              'epgOffset', 'cacheTV' ]
 settings = {}
 
 _url = sys.argv[0]
@@ -140,18 +141,23 @@ class voyobg:
 class voyo_plugin:
     def __init__(self):
         self.wrkdir = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8')
-        self.voyo = voyobg()
-        self.epg = voyo_epg(self.wrkdir)
-        self.epg.start()
-        loginAttemps = 0
         self.getSettings()
+        self.useCacheTV = settings['cacheTV'].lower()=='true'
+        self.useEPG = settings['useEPG'].lower() == 'true'
+        self.epgOffset = int(settings['epgOffset'])
+        self.voyo = voyobg()
+        if not tv_only and self.useEPG: #python 2.6 won't be able to download the epg
+            self.epg = voyo_epg(self.wrkdir, settings['epgURL'])
+            self.epg.start()
+        loginAttemps = 0
         while not self.voyo.login() and loginAttemps < 3:
             loginAttemps += 1
             dialog = xbmcgui.Dialog()
             dialog.ok(u'Грешка', u'Некоректни данни за абонамент!')
             __addon__.openSettings()
             self.getSettings()
-        self.epg.join()
+        if not tv_only and self.useEPG: #python 2.6 won't be able to download the epg
+            self.epg.join()
 
         logofname = '{0}logos.json'.format(self.wrkdir)
         if xbmcvfs.exists(logofname):
@@ -184,6 +190,8 @@ class voyo_plugin:
             settings[key] = __addon__.getSetting(key)
 
     def getSavedTV(self):
+        if not self.useCacheTV:
+            return []
         tvdb_exists = False
         tvdb = os.path.join(self.wrkdir, 'voyotv.json')
         if xbmcvfs.exists(tvdb):
@@ -191,8 +199,10 @@ class voyo_plugin:
             now = time.time()
             tvdb_exists = True
         if not tvdb_exists or mtime + 24*60*60 < now: # more that 24 hours - expired
+            log('no cached tv data or expired')
             return []
         if tvdb_exists:
+            log('loading cached tv data')
             with open(tvdb, 'r') as fp:
                 tvcont = fp.read()
                 tvitems = json.loads(tvcont)
@@ -200,6 +210,8 @@ class voyo_plugin:
         return []
 
     def saveTV(self, tvitems):
+        if not self.useCacheTV:
+            return
         tvdb = os.path.join(self.wrkdir,'voyotv.json')
         with open(tvdb, 'w') as fp:
             tvcont = json.dumps(tvitems)
@@ -289,31 +301,32 @@ class voyo_plugin:
         if play_url:
             chan_epg = []
             epg_str = ''
-            offset = -2*60*60 # to be defined externally
-            if name in tvmapping:
-                name = tvmapping[name]
-                if name in self.logos:
-                    img = self.logos[name]
-                if name in self.epg:
-                    chan_epg = self.epg[name]
-                cnt = 0
-                now = time.time()
-                for it in chan_epg:
-                    start = time.mktime(
-                        time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
-                    start += offset
-                    stop = time.mktime(
-                        time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
-                    stop += offset
-                    title = it[2].encode('utf-8')
-                    if (start < now and stop >= now) or (now < start):
-                        cnt += 1
-                        ln = '{0} {1}\n'.format(
-                            time.strftime('%H:%M', time.localtime(start)),
-                                                title)
-                        epg_str += ln
-                    if cnt >= 10:
-                        break
+            offset = self.epgOffset
+            if self.useEPG:
+                if name in tvmapping:
+                    name = tvmapping[name]
+                    if name in self.logos:
+                        img = self.logos[name]
+                    if name in self.epg:
+                        chan_epg = self.epg[name]
+                    cnt = 0
+                    now = time.time()
+                    for it in chan_epg:
+                        start = time.mktime(
+                            time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
+                        start += offset
+                        stop = time.mktime(
+                            time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
+                        stop += offset
+                        title = it[2].encode('utf-8')
+                        if (start < now and stop >= now) or (now < start):
+                            cnt += 1
+                            ln = '{0} {1}\n'.format(
+                                time.strftime('%H:%M', time.localtime(start)),
+                                                    title)
+                            epg_str += ln
+                        if cnt >= 10:
+                            break
             li = xbmcgui.ListItem(label=name, path=play_url)
             li.setInfo(type="Video", infoLabels={'genre':'TV',
                 'plot':epg_str })

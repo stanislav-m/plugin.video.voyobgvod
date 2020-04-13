@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as etree
+import xml.etree.cElementTree as cetree
 import sys
 import json
 import requests
@@ -8,6 +9,7 @@ import time
 import threading
 import datetime
 import codecs
+import subprocess
 
 epg_url = 'https://epg.kodibg.org/dl.php'
 channel_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady", "RING","VoyoCinema"]
@@ -23,6 +25,13 @@ class voyo_epg(threading.Thread):
         self.__xmlepg = '{0}epg.xml'.format(self.__workdir)
         self.__gzfile = '{0}epg.xml.gz'.format(self.__workdir)
 
+    def __find_gzip(self):
+        for gzbin in ['/bin/gzip', '/usr/bin/gzip', '/usr/local/bin/gzip', '/system/bin/gzip']:
+            if os.path.exists(gzbin):
+                return gzbin
+        return None
+
+
     def __download(self, chunk_size=128):
         requests.packages.urllib3.disable_warnings()
         attempt = 0
@@ -35,26 +44,43 @@ class voyo_epg(threading.Thread):
                         for chunk in r.iter_content(chunk_size=chunk_size):
                             fd.write(chunk)
                     return True
-            except:
+            except Exception as ex:
                 return False
         return False
 
     def __unpack(self):
-        with gzip.GzipFile(self.__gzfile, "rb") as f:
-            try:
-                content = f.read()
-                with open(self.__xmlepg, 'wb') as xmlf:
-                    xmlf.write(content)
+        try:
+            curdir = os.getcwd()
+            os.chdir(self.__workdir)
+            with gzip.GzipFile('epg.xml.gz', 'rb') as ingz:
+                content = ingz.read()
+                with file('epg.xml', 'wb') as outf:
+                    outf.write(content)
+            os.chdir(curdir)
+            return True
+        except Exception as ex:
+            if os.path.exists('epg.xml'):
+                os.unlink('epg.xml')
+            gzip_binary = self.__find_gzip()
+            if gzip_binary != None and len(gzip_binary):
+                try:
+                    retval = subprocess.call([gzip_binary, '-d', 'epg.xml.gz'])
                     return True
-            except:
-                return False
+                except Exception as e:
+                    pass
+            os.chdir(curdir)
+            return False
 
-    def __getLogo(self):
+    def __getLogo(self, useCetree=True):
         logos = {}
         chan =[]
         chan.extend(self.__chan_set)
         name = icon = ''
-        for event, element in etree.iterparse(self.__xmlepg, events=("start", "end")):
+        if useCetree:
+            interparse = cetree.iterparse(self.__xmlepg, events=("start", "end"))
+        else:
+            interparse = etree.iterparse(self.__xmlepg, events=("start", "end"))
+        for event, element in interparse:
             if len(chan) == 0:
                 break
             if event == 'end':
@@ -69,11 +95,15 @@ class voyo_epg(threading.Thread):
                     icon = element.attrib['src']
         return logos
 
-    def __getChannelEpg(self):
+    def __getChannelEpg(self, useCetree=True):
         start = stop = title = desc = icon = ''
         epg_dict = {}
         emptylist = []
-        for event, element in etree.iterparse(self.__xmlepg, events=("start", "end")):
+        if useCetree:
+            interparse = cetree.iterparse(self.__xmlepg, events=("start", "end"))
+        else:
+            interparse = etree.iterparse(self.__xmlepg, events=("start", "end"))
+        for event, element in interparse:
             if event == 'end':
                 if element.tag == "programme":
                     start = element.attrib['start']
@@ -109,10 +139,18 @@ class voyo_epg(threading.Thread):
             epg_exists = True
         if not epg_exists or mtime + 24*60*60 < now: # more that 24 hours - expired
             if self.__download() and self.__unpack():
-                logostr = json.dumps(self.__getLogo(), ensure_ascii=False)
+                #this to run python implementation of etree if C implementation
+                #fails
+                try:
+                    logodict = self.__getLogo()
+                    epgdict = self.__getChannelEpg()
+                except:
+                    logodict = self.__getLogo(False)
+                    epgdict = self.__getChannelEpg(False)
+                logostr = json.dumps(logodict, ensure_ascii=False)
                 with open(logofname, 'w') as f:
                     f.write(logostr)
-                epg_str = json.dumps(self.__getChannelEpg(), ensure_ascii=False)
+                epg_str = json.dumps(epgdict, ensure_ascii=False)
                 with codecs.open(epgfname, 'w', 'utf-8') as f:
                     f.write(epg_str)
             self.__tidyup()
