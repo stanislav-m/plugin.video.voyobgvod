@@ -231,8 +231,7 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
                     name = it['class'][0]
                     link = it.a['href']
                     img = 'https://voyo.bg{0}'.format(it.a.div.img['src'])
-                    play_url = self.channel_url(link)
-                    channel_list.append((name, url, img, play_url))
+                    channel_list.append((name, link, img))
         return channel_list
 
     def __play_link(self, soup):

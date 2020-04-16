@@ -142,7 +142,6 @@ class voyo_plugin:
     def __init__(self):
         self.wrkdir = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8')
         self.getSettings()
-        self.useCacheTV = settings['cacheTV'].lower()=='true'
         self.useEPG = settings['useEPG'].lower() == 'true'
         self.epgOffset = int(settings['epgOffset'])
         self.voyo = voyobg()
@@ -188,34 +187,6 @@ class voyo_plugin:
             __addon__.setSetting('device', settings['device'])
         for key in config_par:
             settings[key] = __addon__.getSetting(key)
-
-    def getSavedTV(self):
-        if not self.useCacheTV:
-            return []
-        tvdb_exists = False
-        tvdb = os.path.join(self.wrkdir, 'voyotv.json')
-        if xbmcvfs.exists(tvdb):
-            mtime = os.path.getmtime(tvdb)
-            now = time.time()
-            tvdb_exists = True
-        if not tvdb_exists or mtime + 24*60*60 < now: # more that 24 hours - expired
-            log('no cached tv data or expired')
-            return []
-        if tvdb_exists:
-            log('loading cached tv data')
-            with open(tvdb, 'r') as fp:
-                tvcont = fp.read()
-                tvitems = json.loads(tvcont)
-                return tvitems
-        return []
-
-    def saveTV(self, tvitems):
-        if not self.useCacheTV:
-            return
-        tvdb = os.path.join(self.wrkdir,'voyotv.json')
-        with open(tvdb, 'w') as fp:
-            tvcont = json.dumps(tvitems)
-            fp.write(tvcont)
 
     def list_categories(self):
         xbmcplugin.setPluginCategory(_handle, 'Voyobg')
@@ -292,57 +263,69 @@ class voyo_plugin:
             u'Грешка',
             u'Видеото не е налично.')
 
-    def list_play_tv_url(self, name, link, img, play_url):
+    def get_channel_epg(self, name, i):
         tvmapping = {
             'btv': "bTV", 'int': "bTVi", 'comedy': "bTVComedy",
             'cinema': "bTVCinema", 'action': "bTVAction", 'lady': "bTVLady",
             'ring': "RING", 'voyo-cinema':"VoyoCinema"
         }
-        if play_url:
-            chan_epg = []
-            epg_str = ''
-            offset = self.epgOffset * 60 * 60
-            if self.useEPG:
-                if name in tvmapping:
-                    name = tvmapping[name]
-                    if name in self.logos:
-                        img = self.logos[name]
-                    if name in self.epg:
-                        chan_epg = self.epg[name]
-                    cnt = 0
-                    now = time.time()
-                    for it in chan_epg:
-                        start = time.mktime(
-                            time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
-                        start += offset
-                        stop = time.mktime(
-                            time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
-                        stop += offset
-                        title = it[2].encode('utf-8')
-                        if (start < now and stop >= now) or (now < start):
-                            cnt += 1
-                            ln = '{0} {1}\n'.format(
-                                time.strftime('%H:%M', time.localtime(start)),
-                                                    title)
-                            epg_str += ln
-                        if cnt >= 10:
-                            break
-            li = xbmcgui.ListItem(label=name, path=play_url)
-            li.setInfo(type="Video", infoLabels={'genre':'TV',
-                'plot':epg_str })
-            li.setArt({'thumb': img, 'icon': img, 'fanart': img})
-            li.setProperty("IsPlayable", str(True))
-            if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
-                headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
-                PROTOCOL = 'hls'
-                is_helper = inputstreamhelper.Helper(PROTOCOL)
-                if is_helper.check_inputstream():
-                    li.setProperty('inputstreamaddon', 'inputstream.adaptive')
-                    li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
-                    li.setProperty('inputstream.adaptive.stream_headers', headers)
-                else:
-                    log('inputstreamhelper check failed.')
-            xbmcplugin.addDirectoryItem(_handle, play_url, li)
+        chan_epg = []
+        epg_str = ''
+        img = i
+        offset = self.epgOffset * 60 * 60
+        if self.useEPG:
+            if name in tvmapping:
+                name = tvmapping[name]
+                if name in self.logos:
+                    img = self.logos[name]
+                if name in self.epg:
+                    chan_epg = self.epg[name]
+                cnt = 0
+                now = time.time()
+                for it in chan_epg:
+                    start = time.mktime(
+                        time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
+                    start += offset
+                    stop = time.mktime(
+                        time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
+                    stop += offset
+                    title = it[2].encode('utf-8')
+                    if (start < now and stop >= now) or (now < start):
+                        cnt += 1
+                        ln = '{0} {1}\n'.format(
+                            time.strftime('%H:%M', time.localtime(start)),
+                                                title)
+                        epg_str += ln
+                    if cnt >= 10:
+                        break
+        return epg_str, img
+
+    def play_tv(self, params):
+        self.device_status()
+        category = params['category']
+        name = params['name']
+        img = params['img']
+        link = category.replace('_', '/')
+        play_url = self.voyo.channel(link)
+        epg_str, img = self.get_channel_epg(name, img)
+
+        li = xbmcgui.ListItem(label=name, path=play_url)
+        li.setInfo(type="Video", infoLabels={'genre':'TV',
+            'plot':epg_str })
+        li.setArt({'thumb': img, 'icon': img, 'fanart': img})
+        li.setProperty("IsPlayable", str(True))
+        if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
+            headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
+            PROTOCOL = 'hls'
+            is_helper = inputstreamhelper.Helper(PROTOCOL)
+            if is_helper.check_inputstream():
+                li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
+                li.setProperty('inputstream.adaptive.stream_headers', headers)
+            else:
+                log('inputstreamhelper check failed.')
+        #xbmcplugin.setResolvedUrl(_handle, succeeded=True, listitem=li)
+        xbmc.Player().play(play_url, li)
 
     def list_content(self, params):
         self.device_status()
@@ -351,13 +334,13 @@ class voyo_plugin:
         xbmcplugin.setPluginCategory(_handle, category)
         xbmcplugin.setContent(_handle, 'videos')
         if cat_link == '/tv-radio/':
-            content = self.getSavedTV()
-            if len(content) == 0:
-                content = self.voyo.tv_radio(cat_link)
-                self.saveTV(content)
+            action_str = 'listing_tv'
+            content = self.voyo.tv_radio(cat_link)
+            log('total {0} channels'.format(len(content)))
             for cont in content:
-                name, link, img, play_url = cont
-                self.list_play_tv_url(name, link, img, play_url)
+                name, link, img = cont
+                epg_str, img = self.get_channel_epg(name, img)
+                self.list_item(name, link, img, epg_str, action_str)
         else:
             ret = self.voyo.process_page(cat_link)
             if ret:
@@ -399,6 +382,8 @@ class voyo_plugin:
         if params:
             if params['action'] == 'listing_sections':
                 self.list_content(params)
+            elif params['action'] == 'listing_tv':
+                self.play_tv(params)
             else:
                 raise ValueError('Invalid paramstring: {0}!'.format(paramstring))
         else:
