@@ -22,7 +22,7 @@ import json
 import codecs
 
 config_par = ['username', 'password', 'device', 'useEPG', 'epgURL',
-              'epgOffset', 'cacheTV' ]
+              'epgOffset', 'wrkdir' ]
 settings = {}
 
 _url = sys.argv[0]
@@ -142,11 +142,16 @@ class voyo_plugin:
     def __init__(self):
         self.wrkdir = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8')
         self.getSettings()
+        if 'wrkdir' in settings:
+            swd = settings['wrkdir']
+            if len(swd) > 0:
+                self.wrkdir = swd
+        log('workdir: {0}'.format(self.wrkdir))
         self.useEPG = settings['useEPG'].lower() == 'true'
         self.epgOffset = int(settings['epgOffset'])
         self.voyo = voyobg()
         if not tv_only and self.useEPG: #python 2.6 won't be able to download the epg
-            self.epg = voyo_epg(self.wrkdir, settings['epgURL'])
+            self.epg = voyo_epg(self.wrkdir, settings['epgURL'], self.epgOffset)
             self.epg.start()
         loginAttemps = 0
         while not self.voyo.login() and loginAttemps < 3:
@@ -187,6 +192,7 @@ class voyo_plugin:
             __addon__.setSetting('device', settings['device'])
         for key in config_par:
             settings[key] = __addon__.getSetting(key)
+        log(settings)
 
     def list_categories(self):
         xbmcplugin.setPluginCategory(_handle, 'Voyobg')
@@ -222,10 +228,11 @@ class voyo_plugin:
         dict_url = {'action' : act_str, 'category': link.replace('/', '_')}
         if meta_inf:
             dict_url.update(meta_inf)
-        url = getUrl(dict_url)
         isDir = True
         if act_str == 'listing_tv':
+            dict_url['name'] = name
             isDir = False
+        url = getUrl(dict_url)
         xbmcplugin.addDirectoryItem(_handle, url, li, isDir)
 
     def list_play_url(self, name, link, img, plot, meta_inf, play_param):
@@ -276,40 +283,38 @@ class voyo_plugin:
         chan_epg = []
         epg_str = ''
         img = i
-        offset = self.epgOffset * 60 * 60
         if self.useEPG:
             if name in tvmapping:
                 name = tvmapping[name]
-                if name in self.logos:
-                    img = self.logos[name]
-                if name in self.epg:
-                    chan_epg = self.epg[name]
-                cnt = 0
-                now = time.time()
-                for it in chan_epg:
-                    start = time.mktime(
-                        time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
-                    start += offset
-                    stop = time.mktime(
-                        time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
-                    stop += offset
-                    title = it[2].encode('utf-8')
-                    if (start < now and stop >= now) or (now < start):
-                        cnt += 1
-                        ln = '{0} {1}\n'.format(
-                            time.strftime('%H:%M', time.localtime(start)),
-                                                title)
-                        epg_str += ln
-                    if cnt >= 10:
-                        break
+            if name in self.logos:
+                img = self.logos[name]
+            if name in self.epg:
+                chan_epg = self.epg[name]
+            cnt = 0
+            now = time.time()
+            for it in chan_epg:
+                start = time.mktime(
+                    time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
+                stop = time.mktime(
+                    time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
+                title = it[2].encode('utf-8')
+                if (start < now and stop >= now) or (now < start):
+                    cnt += 1
+                    ln = '{0} {1}\n'.format(
+                        time.strftime('%H:%M', time.localtime(start)),
+                                            title)
+                    epg_str += ln
+                if cnt >= 8:
+                    break
         return epg_str, img, name
 
     def play_tv(self, params):
         self.device_status()
         category = params['category']
         link = category.replace('_', '/')
+        epg_name = params['name']
         name, img, play_url = self.voyo.channel(link)
-        epg_str, img, name = self.get_channel_epg(name, img)
+        epg_str, img, n = self.get_channel_epg(epg_name, img)
         li = xbmcgui.ListItem(label=name, path=play_url)
         li.setInfo(type="Video", infoLabels={'genre':'TV',
             'plot':epg_str })

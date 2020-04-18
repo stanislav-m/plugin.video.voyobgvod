@@ -12,17 +12,24 @@ import codecs
 import subprocess
 
 epg_url = 'https://epg.kodibg.org/dl.php'
-channel_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady", "RING","VoyoCinema"]
+voyo_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
+              "RING", "VoyoCinema"]
+bgtv_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
+              "RING","VoyoCinema", "78TV", "BNT1", "BNT2", "BNT3", "BNT4", "Nova"]
 
 class voyo_epg(threading.Thread):
-    def __init__(self, workdir, url=epg_url, chan_set=channel_names):
+    def __init__(self, workdir, url=epg_url, offset=0, voyo_set=voyo_names,
+                 bgtv=bgtv_names):
         threading.Thread.__init__(self)
         self.__url = url
-        self.__chan_set = chan_set
+        self.__offset = offset
+        self.__voyo_set = voyo_set
+        self.__bgchan_set = bgtv
         self.__workdir = workdir
         if workdir[len(workdir)-1] != '/':
             self.__workdir += '/'
         self.__xmlepg = '{0}epg.xml'.format(self.__workdir)
+        self.__xmlbgepg = '{0}bgepg.xml'.format(self.__workdir)
         self.__gzfile = '{0}epg.xml.gz'.format(self.__workdir)
 
     def __find_gzip(self):
@@ -30,7 +37,6 @@ class voyo_epg(threading.Thread):
             if os.path.exists(gzbin):
                 return gzbin
         return None
-
 
     def __download(self, chunk_size=128):
         requests.packages.urllib3.disable_warnings()
@@ -50,84 +56,115 @@ class voyo_epg(threading.Thread):
 
     def __unpack(self):
         try:
-            curdir = os.getcwd()
-            os.chdir(self.__workdir)
-            with gzip.GzipFile('epg.xml.gz', 'rb') as ingz:
+            with gzip.GzipFile(self.__gzfile, 'rb') as ingz:
                 content = ingz.read()
-                with file('epg.xml', 'wb') as outf:
+                with file(self.__xmlepg, 'wb') as outf:
                     outf.write(content)
             os.chdir(curdir)
             return True
         except Exception as ex:
-            if os.path.exists('epg.xml'):
-                os.unlink('epg.xml')
+            if os.path.exists(self.__xmlepg):
+                os.unlink(self.__xmlepg)
             gzip_binary = self.__find_gzip()
             if gzip_binary != None and len(gzip_binary):
                 try:
-                    retval = subprocess.call([gzip_binary, '-d', 'epg.xml.gz'])
+                    retval = subprocess.call([gzip_binary, '-d', self.__gzfile])
                     return True
                 except Exception as e:
                     pass
-            os.chdir(curdir)
             return False
 
-    def __getLogo(self, useCetree=True):
+    def __adjustTime(self, epgtime):
+        offset = self.__offset * 60 * 60
+        _epgtime = time.mktime(time.strptime(epgtime.split()[0],'%Y%m%d%H%M%S'))
+        _epgtime += offset
+        preftime = time.strftime('%Y%m%d%H%M%S', time.localtime(_epgtime))
+        return '{0}{1}'.format(preftime, epgtime[14:])
+
+    def __process_xml(self, useCetree=True):
+        xml_esc = [
+            ('"', '&quot;'),
+            ('\'', '&apos;'),
+            ('<', '&lt;'),
+            ('>', '&gt;'),
+            ('&', '&amp;')
+        ]
         logos = {}
-        chan =[]
-        chan.extend(self.__chan_set)
-        name = icon = ''
+        epg_dict = {}
+        lang = name = licon = u''
+        start = stop = title = desc = icon = plang = dlang = u''
+        f = codecs.open(self.__xmlbgepg, 'w', 'utf-8')
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write('<tv generator-info-name="Bulgarian EPG Project" ')
+        f.write('generator-info-url="http://epg.kodibg.org">\n')
+
         if useCetree:
             interparse = cetree.iterparse(self.__xmlepg, events=("start", "end"))
         else:
             interparse = etree.iterparse(self.__xmlepg, events=("start", "end"))
         for event, element in interparse:
-            if len(chan) == 0:
-                break
             if event == 'end':
                 if element.tag == "channel":
                     ch = element.attrib['id']
-                    if ch in chan:
-                        logos[ch] = icon
-                        del chan[ch.index(ch)]
+                    if ch in self.__voyo_set:
+                        logos[ch] = licon
+                    if ch in self.__bgchan_set:
+                        f.write('  <{0} id="{1}">\n'.format(element.tag, ch))
+                        f.write('    <display-name lang="{0}">{1}</display-name>\n'.format(
+                            lang, name))
+                        f.write('    <icon src="{0}" />\n'.format(licon))
+                        f.write('  </channel>\n')
+                    ch = licon = lang = name = ''
                 elif element.tag == 'display-name':
+                    lang = element.attrib['lang']
                     name = element.text
                 elif element.tag == 'icon':
-                    icon = element.attrib['src']
-        return logos
-
-    def __getChannelEpg(self, useCetree=True):
-        start = stop = title = desc = icon = ''
-        epg_dict = {}
-        emptylist = []
-        if useCetree:
-            interparse = cetree.iterparse(self.__xmlepg, events=("start", "end"))
-        else:
-            interparse = etree.iterparse(self.__xmlepg, events=("start", "end"))
-        for event, element in interparse:
-            if event == 'end':
-                if element.tag == "programme":
-                    start = element.attrib['start']
-                    stop = element.attrib['stop']
+                    licon = element.attrib['src']
+                elif element.tag == "programme":
+                    start = self.__adjustTime(element.attrib['start'])
+                    stop = self.__adjustTime(element.attrib['stop'])
                     channel = element.attrib['channel']
-                    if channel in self.__chan_set:
+                    if channel in self.__voyo_set:
                         if not (channel in epg_dict):
                             epg_dict[channel] = []
                         #epg_dict[channel].append((start, stop, title, desc, icon))
                         epg_dict[channel].append((start, stop, title, '', icon))
-                    start = stop = title = desc = icon = ''
+                    if channel in self.__bgchan_set:
+                        f.write('  <programme start="{0}" stop="{1}" channel="{2}">\n'.format(
+                            start, stop, channel))
+                        f.write(u'    <title lang="{0}">{1}</title>\n'.format(
+                            plang, title))
+                        if len(desc) > 0:
+                            for c,e in xml_esc:
+                                desc = desc.replace(c, e)
+                            f.write(u'    <desc lang="{0}">{1}</desc>\n'.format(
+                                dlang, desc))
+                        if len(icon) > 0:
+                            f.write('    <icon src="{0}" />\n'.format(icon))
+                        f.write('  </programme>\n')
+                    start = stop = title = desc = icon = plang = ''
                 elif element.tag == 'title':
                     title = element.text
+                    for c,e in xml_esc:
+                        title = title.replace(c, e)
+                    plang = element.attrib['lang']
                 elif element.tag == 'desc':
                     desc = element.text
+                    if len(desc) > 0:
+                        for c,e in xml_esc:
+                            desc = desc.replace(c, e)
+                    dlang = element.attrib['lang']
                 elif element.tag == 'icon':
                     icon = element.attrib['src']
-        return epg_dict
+        f.write('</tv>\n')
+        f.close()
+        return logos, epg_dict
 
     def __tidyup(self):
-        if os.path.exists(self.__xmlepg):
-            os.unlink(self.__xmlepg)
         if os.path.exists(self.__gzfile):
             os.unlink(self.__gzfile)
+        if os.path.exists(self.__xmlepg):
+            os.unlink(self.__xmlepg)
 
     def run(self):
         epg_exists = False
@@ -137,16 +174,14 @@ class voyo_epg(threading.Thread):
             mtime = os.path.getmtime(epgfname)
             now = time.time()
             epg_exists = True
-        if not epg_exists or mtime + 24*60*60 < now: # more that 24 hours - expired
+        if not epg_exists or mtime + 12*60*60 < now: # more that 24 hours - expired
             if self.__download() and self.__unpack():
                 #this to run python implementation of etree if C implementation
                 #fails
                 try:
-                    logodict = self.__getLogo()
-                    epgdict = self.__getChannelEpg()
+                    logodict, epgdict = self.__process_xml()
                 except:
-                    logodict = self.__getLogo(False)
-                    epgdict = self.__getChannelEpg(False)
+                    logodict, epgdict = self.__process_xml(False)
                 logostr = json.dumps(logodict, ensure_ascii=False)
                 with open(logofname, 'w') as f:
                     f.write(logostr)
@@ -154,6 +189,7 @@ class voyo_epg(threading.Thread):
                 with codecs.open(epgfname, 'w', 'utf-8') as f:
                     f.write(epg_str)
             self.__tidyup()
+
 
 def main():
     epg = voyo_epg('./')
