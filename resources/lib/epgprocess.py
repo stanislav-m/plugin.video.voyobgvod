@@ -15,7 +15,9 @@ epg_url = 'https://epg.kodibg.org/dl.php'
 voyo_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
               "RING", "VoyoCinema"]
 bgtv_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
-              "RING","VoyoCinema", "78TV", "BNT1", "BNT2", "BNT3", "BNT4", "Nova"]
+              "RING","VoyoCinema", "78TV", "BNT1", "BNT2", "BNT3", "BNT4",
+              "Nova", "BulgariaOnAir", "DSTV", "TiankovFolk", "City",
+              "Eurocom", "Kanal3"]
 
 class voyo_epg(threading.Thread):
     def __init__(self, workdir, url=epg_url, offset=0, voyo_set=voyo_names,
