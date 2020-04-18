@@ -217,12 +217,16 @@ class voyo_plugin:
         ctxtmenu = []
         ctxtmenu.append(('Информация', 'XBMC.Action(Info)'))
         li.addContextMenuItems(ctxtmenu)
-        dict_url = {'action' : act_str, 'category': link.replace('/', '_'),
-                    'name' : name, 'img' : img, 'plot' : plot, 'link' :link}
+        #dict_url = {'action' : act_str, 'category': link.replace('/', '_'),
+        #            'name' : name, 'img' : img, 'plot' : plot, 'link' :link}
+        dict_url = {'action' : act_str, 'category': link.replace('/', '_')}
         if meta_inf:
             dict_url.update(meta_inf)
         url = getUrl(dict_url)
-        xbmcplugin.addDirectoryItem(_handle, url, li, True)
+        isDir = True
+        if act_str == 'listing_tv':
+            isDir = False
+        xbmcplugin.addDirectoryItem(_handle, url, li, isDir)
 
     def list_play_url(self, name, link, img, plot, meta_inf, play_param):
         log('{0} - {1}'.format(name, play_param['play_url']))
@@ -298,17 +302,14 @@ class voyo_plugin:
                         epg_str += ln
                     if cnt >= 10:
                         break
-        return epg_str, img
+        return epg_str, img, name
 
     def play_tv(self, params):
         self.device_status()
         category = params['category']
-        name = params['name']
-        img = params['img']
         link = category.replace('_', '/')
-        play_url = self.voyo.channel(link)
-        epg_str, img = self.get_channel_epg(name, img)
-
+        name, img, play_url = self.voyo.channel(link)
+        epg_str, img, name = self.get_channel_epg(name, img)
         li = xbmcgui.ListItem(label=name, path=play_url)
         li.setInfo(type="Video", infoLabels={'genre':'TV',
             'plot':epg_str })
@@ -336,10 +337,9 @@ class voyo_plugin:
         if cat_link == '/tv-radio/':
             action_str = 'listing_tv'
             content = self.voyo.tv_radio(cat_link)
-            log('total {0} channels'.format(len(content)))
             for cont in content:
                 name, link, img = cont
-                epg_str, img = self.get_channel_epg(name, img)
+                epg_str, img, name = self.get_channel_epg(name, img)
                 self.list_item(name, link, img, epg_str, action_str)
         else:
             ret = self.voyo.process_page(cat_link)

@@ -281,7 +281,9 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
             if not self.device_allowed():
                 if not self.device_add():
                     return None
-            return self.__get_product_url(pl_par['product'], pl_par['unit'], media,
+
+            title, url, img, plot, meta_info =  self.__find_meta(soup)
+            return title, img, self.__get_product_url(pl_par['product'], pl_par['unit'], media,
                 pl_par['site'], pl_par['section'], self.__settings['device'])
 
     def process_play_url(self, href):
