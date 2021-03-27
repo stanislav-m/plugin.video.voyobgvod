@@ -2,9 +2,6 @@
 import sys
 import os
 import threading
-from urllib import urlencode
-from urllib import quote_plus
-from urlparse import parse_qsl
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
@@ -17,6 +14,14 @@ if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >
     tv_only = False
 else:
     tv_only = True
+if sys.version_info[0] == 2:
+    from urllib import urlencode
+    from urllib import quote_plus
+    from urlparse import parse_qsl
+else:
+    from urllib.parse import urlencode
+    from urllib.parse import quote_plus
+    from urllib.parse import parse_qsl
 import uuid
 import json
 import codecs
@@ -140,7 +145,10 @@ class voyobg:
 
 class voyo_plugin:
     def __init__(self):
-        self.wrkdir = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8')
+        if sys.version_info[0] == 2:
+            self.wrkdir = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode('utf-8')
+        else:
+            self.wrkdir = xbmcvfs.translatePath(__addon__.getAddonInfo('profile'))
         self.getSettings()
         if 'wrkdir' in settings:
             swd = settings['wrkdir']
@@ -151,8 +159,9 @@ class voyo_plugin:
         self.epgOffset = int(settings['epgOffset'])
         self.voyo = voyobg()
         if not tv_only and self.useEPG: #python 2.6 won't be able to download the epg
-            self.epg = voyo_epg(self.wrkdir, settings['epgURL'], self.epgOffset)
-            self.epg.start()
+            self.epg = voyo_epg(self.wrkdir)
+            self.epg.configure(self.wrkdir, settings['epgURL'], self.epgOffset)
+            self.epg.run()
         loginAttemps = 0
         while not self.voyo.login() and loginAttemps < 3:
             loginAttemps += 1
@@ -160,8 +169,6 @@ class voyo_plugin:
             dialog.ok(u'Грешка', u'Некоректни данни за абонамент!')
             __addon__.openSettings()
             self.getSettings()
-        if not tv_only and self.useEPG: #python 2.6 won't be able to download the epg
-            self.epg.join()
 
         logofname = '{0}logos.json'.format(self.wrkdir)
         if xbmcvfs.exists(logofname):
@@ -259,12 +266,16 @@ class voyo_plugin:
                         inf_labels[mf] = meta_inf[mf]
                 li.setInfo(type="Video", infoLabels=inf_labels)
                 li.setArt({'thumb': img, 'icon': img, 'fanart': img})
-                li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                if sys.version_info[0] == 2:
+                    li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                else:
+                    li.setProperty('inputstream', 'inputstream.adaptive')
                 li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
                 li.setProperty('inputstream.adaptive.stream_headers', headers)
                 li.setProperty('inputstream.adaptive.license_type', DRM)
                 licURL = play_param['license_url'] + '||R{SSM}|BJBwvlic'
                 li.setProperty('inputstream.adaptive.license_key', licURL)
+                li.setProperty('inputstream.adaptive.media_renewal_time', '600')
                 li.setMimeType('application/dash+xml')
                 li.setProperty("IsPlayable", str(True))
                 xbmcplugin.addDirectoryItem(_handle, play_param['play_url'], li)
@@ -297,7 +308,10 @@ class voyo_plugin:
                     time.strptime(it[0].split()[0],'%Y%m%d%H%M%S'))
                 stop = time.mktime(
                     time.strptime(it[1].split()[0],'%Y%m%d%H%M%S'))
-                title = it[2].encode('utf-8')
+                if sys.version_info[0] == 2:
+                    title = it[2].encode('utf-8')
+                else:
+                    title = it[2]
                 if (start < now and stop >= now) or (now < start):
                     cnt += 1
                     ln = '{0} {1}\n'.format(
@@ -325,12 +339,14 @@ class voyo_plugin:
             PROTOCOL = 'hls'
             is_helper = inputstreamhelper.Helper(PROTOCOL)
             if is_helper.check_inputstream():
-                li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                if sys.version_info[0] == 2:
+                    li.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                else:
+                    li.setProperty('inputstream', 'inputstream.adaptive')
                 li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
                 li.setProperty('inputstream.adaptive.stream_headers', headers)
             else:
                 log('inputstreamhelper check failed.')
-        #xbmcplugin.setResolvedUrl(_handle, succeeded=True, listitem=li)
         xbmc.Player().play(play_url, li)
 
     def list_content(self, params):

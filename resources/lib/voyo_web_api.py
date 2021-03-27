@@ -134,7 +134,7 @@ embed=0&mute=0&size=&realSite={5}&width=995&height=604&hash=&dev={6}&\
 finish=finishedPlayer&streamQuality=NaN&imsz=711x448&r={7}'.format(
                 product, unit, media, site, section, site, device, random.random()
             )
-        self.__res = self.__ses.post(url)
+        self.__res = self.__ses.get(url)
         if self.__res.status_code == 200:
             j = self.__res.json()
             if j['status'] == 'PLAYING':
@@ -184,7 +184,7 @@ embed=0&mute=0&size=&realSite={5}&width=995&height=604&hash=&finish=finishedPlay
 wv=0&sts=undefined&formatQuality=null&r={7}'.format(
                 product, unit, media, site, section, site, device, random.random()
             )
-        self.__res = self.__ses.post(url, headers=headers)
+        self.__res = self.__ses.get(url, headers=headers)
         if self.__res.status_code == 200:
             j = self.__res.json()
             if not j['error']:
@@ -192,9 +192,9 @@ wv=0&sts=undefined&formatQuality=null&r={7}'.format(
                 sp = BeautifulSoup(html, 'html.parser')
                 jscript = sp.find_all('script')
                 for js in jscript:
-                    if 'src' not in js:
-                        if len(js.text.encode(self.__res.encoding)) > 0:
-                            return self.__get_shaka_params(js.text)
+                    if not js.has_attr('src'):
+                        if len(js.string.encode(self.__res.encoding)) > 0:
+                            return self.__get_shaka_params(js.string)
         return ''
 
     def device_remove(self, dev_id):
@@ -254,14 +254,15 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
         par_fnd = False
         med_fnd = False
         pl_par = {}
-        jscript = soup.find_all('script', language="JavaScript1.1", type="text/javascript")
+        jscript = soup.find_all(b'script', language="JavaScript1.1", type="text/javascript")
         for js in jscript:
-            if js.text.find('var ut_section_id =') > 0:
+            if js.string and js.string.find('var ut_section_id =') > 0:
                 for key in s_patt:
-                    pl_par[key] = self.__parse_par(s_patt[key], js.text)
+                    pl_par[key] = self.__parse_par(s_patt[key], js.string)
                 par_fnd = True
-            elif js.text.find('mainVideo = new mediaData(') > 0:
-                pl_par['media'] = self.__parse_par('mainVideo = new mediaData\(\\d+, \\d+, (\\d+),', js.text)
+            elif js.string and js.string.find('mainVideo = new mediaData(') > 0:
+                pl_par['media'] = self.__parse_par('mainVideo = new mediaData\(\\d+, \\d+, (\\d+),',
+                                                              js.string)
                 med_fnd = True
             if med_fnd and par_fnd:
                 break
@@ -273,11 +274,12 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
         media = ''
         if self.__res.status_code == 200:
             whole_page = self.__res.text.encode('utf-8')
-            if whole_page.find('mainVideo = new mediaData('):
-                media = self.__parse_par('mainVideo = new mediaData\(\\d+, \\d+, (\\d+),',
-                                     whole_page)
+            if whole_page.find(b'mainVideo = new mediaData('):
+                media = self.__parse_par(b'mainVideo = new mediaData\(\\d+, \\d+, (\\d+),',
+                                     whole_page).decode("utf-8")
             soup = BeautifulSoup(self.__res.text, 'html.parser')
             pl_par = self.__player_params(soup)
+
             if not self.device_allowed():
                 if not self.device_add():
                     return None
@@ -342,7 +344,7 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
                 meta_info['plot'] = plot.encode(self.__res.encoding)
 
         return (title.encode(self.__res.encoding),
-                url.encode(self.__res.encoding).replace('http://', 'https://'),
+                url.encode(self.__res.encoding).replace(b'http://', b'https://'),
                 img.encode(self.__res.encoding),
                 plot.encode(self.__res.encoding), meta_info)
 
