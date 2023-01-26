@@ -269,7 +269,7 @@ x=device&a=remove&id={0}r={1}'.format(dev_id, random.random())
         return pl_par
 
     def channel_url(self, href):
-        url = 'https://voyo.bg{0}'.format(href)
+        url = href
         self.__res = self.__ses.post(url)
         media = ''
         if self.__res.status_code == 200:
