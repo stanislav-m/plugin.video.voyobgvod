@@ -7,7 +7,8 @@ import xbmcplugin
 import xbmcaddon
 import xbmcvfs
 from bs4 import BeautifulSoup
-from resources.lib.voyo_web_api import *
+#from resources.lib.voyo_web_api import *
+from resources.lib.voyo_napi import *
 from resources.lib.epgprocess import *
 if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
     import inputstreamhelper
@@ -80,40 +81,39 @@ def get_prn(msg):
         s = str(msg)
     return s
 
-def log_primitive(msg, level):
+def log_primitive(msg):
     if str(type(msg)) == "<type 'unicode'>":
         s = msg.encode('utf-8')
     else:
         s = str(msg)
-    xbmc.log("{0} v{1} | {2}".format(get_addon_id(), get_addon_version(), s), level)
+    xbmc.log("{0} v{1} | {2}".format(get_addon_id(), get_addon_version(), s), xbmc.LOGDEBUG)
 
-def log(msg, level=xbmc.LOGDEBUG):
+def log(msg):
     try:
-        level = xbmc.LOGNOTICE
         if str(type(msg)) == "<type 'list'>" or str(type(msg)) == "<type 'tuple'>":
             for m in msg:
-                log_primitive(msg, level)
+                log_primitive(msg)
         elif str(type(msg)) == "<type 'dict'>":
             for key in msg:
                 log_primitive('{0} : {1}'.format(
-                    get_prn(key), get_prn(msg[key])), level)
+                    get_prn(key), get_prn(msg[key])))
         else:
-            log_primitive(msg, level)
+            log_primitive(msg)
 
     except:
         try:
             import traceback
             er = traceback.format_exc(sys.exc_info())
-            xbmc.log('%s | Logging failure: %s' % (get_addon_id(), er), level)
+            xbmc.log('%s | Logging failure: %s' % (get_addon_id(), er), xbmc.LOGDEBUG)
         except:
             pass
 
 class voyobg:
     def __init__(self):
-        self.__api = voyo_web_api(settings)
+        self.__napi = voyo_napi(settings)
 
     def login(self):
-        return self.__api.login()
+        return self.__napi.login()
 
     def get_devices(self):
         return self.__api.list_devices()
@@ -125,22 +125,25 @@ class voyobg:
         return self.__api.device_remove(dev_id)
 
     def sections(self):
-        return self.__api.sections()
+        return self.__napi.sections()
 
     def tv_radio(self, href):
-        return self.__api.tv_radio(href)
+        return self.__napi.tv()
 
     def channel(self, href):
-        return self.__api.channel_url(href)
+        return self.__napi.get_play_link(href)
 
-    def series(self, href):
-        return self.__api.list_series(href)
+    def episodes(self, product_id):
+        return self.__napi.episodes(product_id)
+    
+    def process_page(self, id, s, p):
+        return self.__napi.categories(id, s, p)
 
-    def process_page(self, href):
-        return self.__api.process_page(href)
+    def product_info(self, productId):
+        return self.__napi.product_info(productId)
 
-    def process_play_url(self, href):
-        return self.__api.process_play_url(href)
+    def process_play_url(self, productId):
+        return self.__napi.get_play_link(productId)
 
 
 class voyo_plugin:
@@ -205,20 +208,23 @@ class voyo_plugin:
         xbmcplugin.setPluginCategory(_handle, 'Voyobg')
         xbmcplugin.setContent(_handle, 'videos')
         categories = self.voyo.sections()
-        for name, link in categories:
+        for cat in categories:
+            link = cat['url']
+            name = cat['name']
+            desciption  = cat['description']
             if tv_only:
-                if link != '/tv-radio/':
+                if cat['url'] != '/tv-radio/':
                     continue
             li = xbmcgui.ListItem(label=name)
             li.setInfo('video', {'title': name,
-                                        'genre': 'Voyo content',
+                                        'genre': desciption,
                                         'mediatype': 'video'})
             url = get_url(action='listing_sections', category=link.replace('/', '_'))
             is_folder = True
             xbmcplugin.addDirectoryItem(_handle, url, li, is_folder)
         xbmcplugin.endOfDirectory(_handle)
 
-    def list_item(self, name, link, img, plot, act_str, meta_inf=None):
+    def list_item(self, name, link, img, plot, productId, act_str, meta_inf=None, page=None):
         log('{0} :  {1} - {2}'.format(name, link, img))
         li = xbmcgui.ListItem(label=name)
         art = { 'thumb': img, 'poster': img, 'banner' : img, 'fanart': img }
@@ -232,18 +238,21 @@ class voyo_plugin:
         li.addContextMenuItems(ctxtmenu)
         #dict_url = {'action' : act_str, 'category': link.replace('/', '_'),
         #            'name' : name, 'img' : img, 'plot' : plot, 'link' :link}
-        dict_url = {'action' : act_str, 'category': link.replace('/', '_')}
+        dict_url = {'action' : act_str, 'category': link.replace('/', '_') }
         if meta_inf:
             dict_url.update(meta_inf)
         isDir = True
         if act_str == 'listing_tv':
             dict_url['name'] = name
             isDir = False
+        dict_url['productId'] = productId
+        if page:
+            dict_url['page'] = page
         url = getUrl(dict_url)
         xbmcplugin.addDirectoryItem(_handle, url, li, isDir)
 
     def list_play_url(self, name, link, img, plot, meta_inf, play_param):
-        log('{0} - {1}'.format(name, play_param['play_url']))
+        log('{0}: {1} - {2}'.format(name, img, play_param['url']))
         if not (sys.version_info[0] > 2 or sys.version_info[0] == 2 and
                 sys.version_info[1] >= 7):
             dialog = xbmcgui.Dialog()
@@ -254,12 +263,12 @@ class voyo_plugin:
         if play_param:
             headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
             PROTOCOL = 'mpd'
-            DRM = 'com.widevine.alpha'
+            DRM = play_param['drm']['keySystem']
             is_helper = inputstreamhelper.Helper(PROTOCOL, drm=DRM)
             if is_helper.check_inputstream():
                 metaflds = ['genre', 'country', 'rating', 'year', 'duration',
                             'plot']
-                li = xbmcgui.ListItem(label=name, path=play_param['play_url'])
+                li = xbmcgui.ListItem(label=name, path=play_param['url'])
                 inf_labels = {}
                 for mf in metaflds:
                     if mf in meta_inf:
@@ -273,12 +282,13 @@ class voyo_plugin:
                 li.setProperty('inputstream.adaptive.manifest_type', PROTOCOL)
                 li.setProperty('inputstream.adaptive.stream_headers', headers)
                 li.setProperty('inputstream.adaptive.license_type', DRM)
-                licURL = play_param['license_url'] + '||R{SSM}|BJBwvlic'
+                #licURL = play_param['drm']['licenseUrl'] + '||R{SSM}|BJBwvlic'
+                licURL = play_param['drm']['licenseUrl'] + '||R{SSM}|'
                 li.setProperty('inputstream.adaptive.license_key', licURL)
                 li.setProperty('inputstream.adaptive.media_renewal_time', '600')
                 li.setMimeType('application/dash+xml')
                 li.setProperty("IsPlayable", str(True))
-                xbmcplugin.addDirectoryItem(_handle, play_param['play_url'], li)
+                xbmcplugin.addDirectoryItem(_handle, play_param['url'], li)
         else:
             dialog = xbmcgui.Dialog()
             dialog.ok(
@@ -323,11 +333,17 @@ class voyo_plugin:
         return epg_str, img, name
 
     def play_tv(self, params):
-        self.device_status()
+        log('play_tv: params: {}'.format(params))
+        #self.device_status()
         category = params['category']
         link = category.replace('_', '/')
         epg_name = params['name']
-        name, img, play_url = self.voyo.channel(link)
+        productId = params['productId']
+        tv_channel_info = self.voyo.channel(productId)
+        name = tv_channel_info['content']['title']
+        img = tv_channel_info['content']['image']
+        play_url = tv_channel_info['url']
+        protocol = tv_channel_info['videoType']
         epg_str, img, n = self.get_channel_epg(epg_name, img)
         li = xbmcgui.ListItem(label=name, path=play_url)
         li.setInfo(type="Video", infoLabels={'genre':'TV',
@@ -336,7 +352,7 @@ class voyo_plugin:
         li.setProperty("IsPlayable", str(True))
         if sys.version_info[0] > 2 or sys.version_info[0] == 2 and sys.version_info[1] >= 7:
             headers = "User-agent: stagefright/1.2 (Linux;Android 6.0)"
-            PROTOCOL = 'hls'
+            PROTOCOL = protocol
             is_helper = inputstreamhelper.Helper(PROTOCOL)
             if is_helper.check_inputstream():
                 if sys.version_info[0] == 2:
@@ -350,7 +366,7 @@ class voyo_plugin:
         xbmc.Player().play(play_url, li)
 
     def list_content(self, params):
-        self.device_status()
+        #self.device_status()
         category = params['category']
         cat_link = category.replace('_', '/')
         xbmcplugin.setPluginCategory(_handle, category)
@@ -358,27 +374,123 @@ class voyo_plugin:
         if cat_link == '/tv-radio/':
             action_str = 'listing_tv'
             content = self.voyo.tv_radio(cat_link)
-            for cont in content:
-                name, link, img = cont
+            for cont in content['liveTvs']:
+                product_id = cont['id'] 
+                name = cont['name'] 
+                link = cont['url'] 
+                img = cont['logo']
                 epg_str, img, name = self.get_channel_epg(name, img)
-                self.list_item(name, link, img, epg_str, action_str)
+                self.list_item(name, link, img, epg_str, product_id, action_str)
+            for cont in content['liveRadios']:
+                link = cont['url'] 
+                product_id = link[14:][0:5]
+                name = cont['name'] 
+                img = cont['logo']
+                epg_str, img, name = self.get_channel_epg(name, img)
+                self.list_item(name, link, img, epg_str, product_id, action_str)
         else:
-            ret = self.voyo.process_page(cat_link)
-            if ret:
-                if len(ret) == 2:
-                    action_str = 'listing_sections'
-                    content, meta = ret
-                    for cont in content:
-                        name, link, img = cont
-                        self.list_item(name, link, img, '', action_str, meta)
-                else:
-                    name, link, img, plot, meta, play_param = ret
-                    self.list_play_url(name, link, img, plot, meta, play_param)
+            action_str = 'listing_sections'
+            categories = {
+                '/kids/': [(20411, False)],
+                '/concerts/': [(20404, False)],
+                '/more/': [(20346,False)],
+                '/sport/':[(20408,False),(20378,False)],
+                '/films/':[(20344,True)],
+                '/series/':[(20345,True)]
+            }
+            if 'page' in params:
+                page = int(params['page']) + 1
             else:
-                dialog = xbmcgui.Dialog()
-                dialog.ok(
-                u'Грешка',
-                u'Вашето устройство не може да възпроизведе това видео.')
+                page = 1
+            if cat_link in categories:
+                for l in categories[cat_link]:
+                    id, s = l
+                    ret = self.voyo.process_page(id, s, page)
+                    rowcnt = int(ret['found_rows'])
+                    for it in ret['items']:
+                        product_id = it['id']
+                        name = it['title']
+                        link = it['url']
+                        img = it['image']
+                        img = img.replace('{WIDTH}x{HEIGHT}', '284x410')
+                        vtype = it['type']
+                        log('img:{}'.format(img))
+                        if vtype == 'show':
+                            meta = {}
+                            self.list_item(name, link, img, vtype, product_id, action_str, meta)
+                        else:
+                            info = self.voyo.product_info(product_id)
+                            meta = {}
+                            img1 = info['content']['image']
+                            img1.replace('{WIDTH}x{HEIGHT}', '284x410')
+                            plot = info['content']['description']
+                            if len(info['content']['genres'])>0:
+                                meta['genre'] = info['content']['genres'][0]['title']
+                            meta['plot'] = plot
+                            if len(info['productionInfo']['originCountries']):
+                                meta['country'] = info['productionInfo']['originCountries'][0]
+                            meta['rating'] = info['content']['rating']
+                            meta['year'] = info['content']['releaseDateLabel']
+                            meta['duration'] =  info['content']['length']
+                            if 'startAt' in info['stream']:
+                                startAt = info['stream']['startAt']
+                                self.list_item(f"{name} from {startAt}", link, img, vtype, product_id, action_str, meta)
+                            else:
+                                play_param = self.voyo.process_play_url(product_id)
+                                self.list_play_url(name, link, img, plot, meta, play_param)
+                    if rowcnt > page*24:
+                        self.list_item('---more---', cat_link, None, None, id, action_str, None, str(page))
+            else:
+                product_id = params['productId']
+                info = self.voyo.product_info(product_id)
+                meta = {}
+                vtype = info['content']['type']
+                if 'seasons' in info['content']:
+                    seasons = info['content']['seasons']
+                    img = info['content']['image']
+                    img = img.replace('{WIDTH}x{HEIGHT}', '284x410')
+                    plot = info['content']['description']
+                    if len(info['content']['genres']) > 0:
+                        meta['genre'] = info['content']['genres'][0]['title']
+                    meta['plot'] = plot
+                    if len(info['productionInfo']['originCountries'])>0:
+                        meta['country'] = info['productionInfo']['originCountries'][0]
+                    meta['rating'] = info['content']['rating']
+                    meta['year'] = info['content']['releaseDateLabel']
+                    meta['duration'] =  info['content']['length']
+
+                    if len(seasons) > 0:
+                        for ses in seasons:
+                            product_id = ses['id']
+                            img = ses['image']
+                            img = img.replace('{WIDTH}x{HEIGHT}', '284x410')
+                            name = ses['title']
+                            link = ses['url']
+                            self.list_item(name, link, img, vtype, product_id, action_str, meta)
+                else:
+                    eposodes = self.voyo.episodes(product_id)
+                    for it in eposodes['items']:
+                        product_id = it['id']
+                        name = it['title']
+                        link = it['url']
+                        vtype = it['type']
+                        img = it['image']
+                        img = img.replace('{WIDTH}x{HEIGHT}', '284x410')
+                        info = self.voyo.product_info(product_id)
+                        meta = {}
+                        img1 = info['content']['image']
+                        img1.replace('{WIDTH}x{HEIGHT}', '284x410')
+                        plot = info['content']['description']
+                        if len(info['content']['genres']) >0:
+                            meta['genre'] = info['content']['genres'][0]['title']
+                        meta['plot'] = plot
+                        meta['country'] = info['productionInfo']['originCountries'][0]
+                        meta['rating'] = info['content']['rating']
+                        meta['year'] = info['content']['releaseDateLabel']
+                        meta['duration'] =  info['content']['length']
+                        play_param = self.voyo.process_play_url(product_id)
+                        self.list_play_url(name, link, img, plot, meta, play_param)
+
         xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_NONE)
         xbmcplugin.endOfDirectory(_handle)
 
@@ -399,6 +511,7 @@ class voyo_plugin:
                 dialog.ok(u'Грешка', u'Неуспешно изтриване на устройство.')
 
     def run(self, paramstring):
+        log(paramstring)
         params = dict(parse_qsl(paramstring))
         if params:
             if params['action'] == 'listing_sections':
@@ -412,6 +525,7 @@ class voyo_plugin:
 
 if __name__ == '__main__':
     p = sys.argv[2][1:]
+    log(p)
     v = voyo_plugin()
     v.run(p)
 
