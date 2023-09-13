@@ -6,7 +6,7 @@
     </category>
     <category label="EPG">
         <setting label="enable" type="bool" id="useEPG" default="false"/>
-        <setting label="URL" type="text"   id="epgURL" default="https://epg.kodibg.org/dl.php" />
+        <setting label="URL" type="text"   id="epgURL" default="https://epg.cloudns.org/dl.php" />
         <setting label="offset" type="slider" id="epgOffset" subsetting="true" default="0" range="-11,1,11" option="int" />
     </category>
     <category label="TV Channels cache">
