@@ -488,8 +488,12 @@ class voyo_plugin:
                         meta['rating'] = info['content']['rating']
                         meta['year'] = info['content']['releaseDateLabel']
                         meta['duration'] =  info['content']['length']
-                        play_param = self.voyo.process_play_url(product_id)
-                        self.list_play_url(name, link, img, plot, meta, play_param)
+                        if 'startAt' in info['stream']:
+                            startAt = info['stream']['startAt']
+                            self.list_item(f"{name} from {startAt}", link, img, vtype, product_id, action_str, meta)
+                        else:
+                            play_param = self.voyo.process_play_url(product_id)
+                            self.list_play_url(name, link, img, plot, meta, play_param)
 
         xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_NONE)
         xbmcplugin.endOfDirectory(_handle)

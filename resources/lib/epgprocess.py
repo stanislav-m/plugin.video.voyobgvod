@@ -11,15 +11,14 @@ import datetime
 import codecs
 import subprocess
 
-epg_url = 'https://epg.kodibg.org/dl.php'
-voyo_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
-              "RING", "VoyoCinema"]
+epg_url = 'https://epg.cloudns.org/dl.php'
+voyo_names = {"bTV" : "bTV", "bTVComedy":"bTV Comedy", "bTVCinema": "bTV Cinema", "bTVAction": "bTV Action", "bTVLady": "bTV Lady",
+              "RING": "RING.BG"}
 bgtv_names = ["bTVi", "bTV", "bTVComedy", "bTVCinema", "bTVAction", "bTVLady",
               "RING","VoyoCinema", "78TV", "BNT1", "BNT2", "BNT3", "BNT4",
               "Nova", "BulgariaOnAir", "DSTV", "TiankovFolk", "City",
               "Eurocom", "Kanal3"]
 
-#class voyo_epg(threading.Thread):
 class voyo_epg(threading.Thread):
     def __init__(self, workdir, url=epg_url, offset=0, bgtv=None):
         #threading.Thread.__init__(self)
@@ -115,7 +114,7 @@ class voyo_epg(threading.Thread):
                 if element.tag == "channel":
                     ch = element.attrib['id']
                     if ch in self.__voyo_set:
-                        logos[ch] = licon
+                        logos[self.__voyo_set[ch]] = licon
                     if self.__bgchan_set and len(self.__bgchan_set)>0 and ch in self.__bgchan_set:
                         f.write('  <{0} id="{1}">\n'.format(element.tag, ch))
                         f.write('    <display-name lang="{0}">{1}</display-name>\n'.format(
@@ -132,8 +131,9 @@ class voyo_epg(threading.Thread):
                     try:
                         start = self.__adjustTime(element.attrib['start'])
                         stop = self.__adjustTime(element.attrib['stop'])
-                        channel = element.attrib['channel']
-                        if channel in self.__voyo_set:
+                        chann = element.attrib['channel']
+                        if chann in self.__voyo_set:
+                            channel = self.__voyo_set[chann]
                             if not (channel in epg_dict):
                                 epg_dict[channel] = []
                             #epg_dict[channel].append((start, stop, title, desc, icon))
@@ -205,7 +205,7 @@ class voyo_epg(threading.Thread):
             epg_exists = True
 
         if self.__check_file_expired(epglock, 300) and self.__check_file_expired(epgfname, self.__hours*60*60):
-            with open(epglock, 'w') as flc:
+            with open(epglock, 'w+') as flc:
                 flc.write('processing\n')
             if self.__download() and self.__unpack():
                 #this to run python implementation of etree if C implementation
@@ -214,9 +214,9 @@ class voyo_epg(threading.Thread):
                     logodict, epgdict = self.__process_xml()
                 except:
                     logodict, epgdict = self.__process_xml(False)
-                logostr = json.dumps(logodict, ensure_ascii=False)
-                with open(logofname, 'w') as f:
-                    f.write(logostr)
+                #logostr = json.dumps(logodict, ensure_ascii=False)
+                #with open(logofname, 'w') as f:
+                #    f.write(logostr)
                 epg_str = json.dumps(epgdict, ensure_ascii=False)
                 with codecs.open(epgfname, 'w', 'utf-8') as f:
                     f.write(epg_str)
@@ -227,7 +227,7 @@ class voyo_epg(threading.Thread):
 
 
 def main():
-    epg = voyo_epg('./')
+    epg = voyo_epg('/home/stani/Downloads/')
     epg.start()
     epg.join()
     if os.path.exists('epg.json'):
