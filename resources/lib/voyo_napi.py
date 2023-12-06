@@ -70,8 +70,8 @@ class voyo_napi:
             return j
         return None
 
-    def episodes(self, product_id):
-        self.__res = self.__ses.get(f'https://napi.voyo.bg/api/bg/v1/products/{product_id}/episodes?page=1&pagesize=24&sort=episode-desc')
+    def episodes(self, product_id, page=1):
+        self.__res = self.__ses.get(f'https://napi.voyo.bg/api/bg/v1/products/{product_id}/episodes?page={page}&pagesize=24&sort=episode-desc')
         if self.__res.status_code == 200:
             j = self.__res.json()
             return j

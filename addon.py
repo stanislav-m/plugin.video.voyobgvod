@@ -133,8 +133,8 @@ class voyobg:
     def channel(self, href):
         return self.__napi.get_play_link(href)
 
-    def episodes(self, product_id):
-        return self.__napi.episodes(product_id)
+    def episodes(self, product_id, page):
+        return self.__napi.episodes(product_id, page)
     
     def process_page(self, id, s, p):
         return self.__napi.categories(id, s, p)
@@ -371,6 +371,10 @@ class voyo_plugin:
         cat_link = category.replace('_', '/')
         xbmcplugin.setPluginCategory(_handle, category)
         xbmcplugin.setContent(_handle, 'videos')
+        if 'page' in params:
+            page = int(params['page']) + 1
+        else:
+            page = 1
         if cat_link == '/tv-radio/':
             action_str = 'listing_tv'
             content = self.voyo.tv_radio(cat_link)
@@ -398,10 +402,6 @@ class voyo_plugin:
                 '/films/':[(20344,True)],
                 '/series/':[(20345,True)]
             }
-            if 'page' in params:
-                page = int(params['page']) + 1
-            else:
-                page = 1
             if cat_link in categories:
                 for l in categories[cat_link]:
                     id, s = l
@@ -468,7 +468,8 @@ class voyo_plugin:
                             link = ses['url']
                             self.list_item(name, link, img, vtype, product_id, action_str, meta)
                 else:
-                    eposodes = self.voyo.episodes(product_id)
+                    eposodes = self.voyo.episodes(product_id, page)
+                    rowcnt = int(eposodes['found_rows'])
                     for it in eposodes['items']:
                         product_id = it['id']
                         name = it['title']
@@ -494,6 +495,9 @@ class voyo_plugin:
                         else:
                             play_param = self.voyo.process_play_url(product_id)
                             self.list_play_url(name, link, img, plot, meta, play_param)
+                    if rowcnt > page*24:
+                        self.list_item('---more---', cat_link, None, None, product_id, action_str, None, str(page))
+
 
         xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_NONE)
         xbmcplugin.endOfDirectory(_handle)
